@@ -11,13 +11,19 @@ import { errorHandler } from './middleware/errorHandler.js';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Render (and most hosts) sit behind a reverse proxy and set X-Forwarded-*.
+// Required for express-rate-limit and correct req.protocol / IPs.
+app.set('trust proxy', 1);
+
 const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
   .split(',')
-  .map((origin) => origin.trim());
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 app.use(
   cors({
     origin(origin, callback) {
+      // Non-browser clients (health checks, curl) often omit Origin
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
         return;

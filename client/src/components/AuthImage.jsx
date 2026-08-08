@@ -8,11 +8,14 @@ export default function AuthImage({ src, alt, className }) {
   useEffect(() => {
     if (!src) {
       setBlobUrl(null);
+      setError(false);
       return undefined;
     }
 
     let active = true;
     let objectUrl;
+    setBlobUrl(null);
+    setError(false);
 
     fetchImageBlob(src)
       .then((blob) => {
@@ -22,7 +25,10 @@ export default function AuthImage({ src, alt, className }) {
         setError(false);
       })
       .catch(() => {
-        if (active) setError(true);
+        if (active) {
+          setError(true);
+          setBlobUrl(null);
+        }
       });
 
     return () => {
@@ -33,7 +39,9 @@ export default function AuthImage({ src, alt, className }) {
 
   if (!src) {
     return (
-      <div className={`flex items-center justify-center bg-slate-800 text-slate-500 ${className}`}>
+      <div
+        className={`flex items-center justify-center bg-slate-800 text-slate-500 ${className}`}
+      >
         No image
       </div>
     );
@@ -41,7 +49,9 @@ export default function AuthImage({ src, alt, className }) {
 
   if (error) {
     return (
-      <div className={`flex items-center justify-center bg-slate-800 text-red-400 ${className}`}>
+      <div
+        className={`flex items-center justify-center bg-slate-800 text-red-400 ${className}`}
+      >
         Failed to load
       </div>
     );
@@ -49,7 +59,9 @@ export default function AuthImage({ src, alt, className }) {
 
   if (!blobUrl) {
     return (
-      <div className={`flex items-center justify-center bg-slate-800 text-slate-500 ${className}`}>
+      <div
+        className={`flex items-center justify-center bg-slate-800 text-slate-500 ${className}`}
+      >
         Loading...
       </div>
     );

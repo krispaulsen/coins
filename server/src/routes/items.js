@@ -25,29 +25,28 @@ const upload = multer({
   },
 });
 
-function buildImageUrls(item, req) {
-  const base = `${req.protocol}://${req.get('host')}/api/images`;
-  const authHint = true;
+/**
+ * Return API-relative image paths. The client prefixes them with VITE_API_URL
+ * so thumbnails work whether the API is localhost, Render, etc.
+ */
+function buildImageUrls(item) {
+  const toPath = (id) => (id ? `/api/images/${id}` : null);
 
   return {
-    obverse: item.images?.obverseFileId
-      ? `${base}/${item.images.obverseFileId}`
-      : null,
-    reverse: item.images?.reverseFileId
-      ? `${base}/${item.images.reverseFileId}`
-      : null,
-    additional: (item.images?.additionalFileIds || []).map(
-      (id) => `${base}/${id}`
-    ),
-    _authRequired: authHint,
+    obverse: toPath(item.images?.obverseFileId),
+    reverse: toPath(item.images?.reverseFileId),
+    additional: (item.images?.additionalFileIds || [])
+      .filter(Boolean)
+      .map((id) => `/api/images/${id}`),
+    _authRequired: true,
   };
 }
 
-export function serializeItem(item, req, breakdown = null) {
+export function serializeItem(item, _req, breakdown = null) {
   const obj = item.toObject ? item.toObject() : { ...item };
   return {
     ...obj,
-    imageUrls: buildImageUrls(obj, req),
+    imageUrls: buildImageUrls(obj),
     metalBreakdown: breakdown,
   };
 }

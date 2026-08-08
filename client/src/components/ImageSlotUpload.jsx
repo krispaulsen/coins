@@ -14,12 +14,11 @@ export default function ImageSlotUpload({ itemId, imageUrls, onUpdated }) {
     try {
       const formData = new FormData();
       formData.append('image', file);
-      const res = await api.post(`/items/${itemId}/images/${slot}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      // Do not set Content-Type manually — boundary is required for multer.
+      const res = await api.post(`/items/${itemId}/images/${slot}`, formData);
       onUpdated(res.data);
     } catch (err) {
-      setError(err.response?.data?.error || 'Upload failed');
+      setError(err.response?.data?.error || err.message || 'Upload failed');
     } finally {
       setUploading(null);
     }

@@ -19,14 +19,28 @@ export async function processAndUploadImage(buffer, filename, metadata = {}) {
     .toBuffer();
 
   const bucket = getBucket();
-  return new Promise((resolve, reject) => {
-    const uploadStream = bucket.openUploadStream(filename, {
-      contentType: 'image/jpeg',
-      metadata,
-    });
+  const uploadStream = bucket.openUploadStream(filename, {
+    contentType: 'image/jpeg',
+    metadata,
+  });
 
-    uploadStream.on('error', reject);
-    uploadStream.on('finish', () => resolve(uploadStream.id));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      resolve(uploadStream.id);
+    };
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    };
+
+    uploadStream.once('error', fail);
+    // Drivers vary between 'finish' and 'close' for write completion
+    uploadStream.once('finish', succeed);
+    uploadStream.once('close', succeed);
     uploadStream.end(processed);
   });
 }
@@ -35,9 +49,15 @@ export async function deleteFile(fileId) {
   if (!fileId) return;
   const bucket = getBucket();
   try {
-    await bucket.delete(fileId);
+    const id =
+      typeof fileId === 'string'
+        ? new mongoose.Types.ObjectId(fileId)
+        : fileId;
+    await bucket.delete(id);
   } catch (err) {
-    if (err.code !== 'ENOENT') throw err;
+    // File already gone — ignore
+    if (err?.code === 'ENOENT' || err?.codeName === 'FileNotFound') return;
+    throw err;
   }
 }
 
@@ -45,13 +65,18 @@ export async function deleteFiles(fileIds) {
   await Promise.all(fileIds.filter(Boolean).map((id) => deleteFile(id)));
 }
 
+function asObjectId(fileId) {
+  if (fileId instanceof mongoose.Types.ObjectId) return fileId;
+  return new mongoose.Types.ObjectId(fileId);
+}
+
 export function openDownloadStream(fileId) {
   const bucket = getBucket();
-  return bucket.openDownloadStream(fileId);
+  return bucket.openDownloadStream(asObjectId(fileId));
 }
 
 export async function fileExists(fileId) {
   const bucket = getBucket();
-  const files = await bucket.find({ _id: fileId }).limit(1).toArray();
+  const files = await bucket.find({ _id: asObjectId(fileId) }).limit(1).toArray();
   return files.length > 0;
 }
