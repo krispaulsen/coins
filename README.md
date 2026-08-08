@@ -109,7 +109,7 @@ No paid third-party API keys are required for the MVP.
 
 - **Auth** — email/password register & login, JWT (7-day expiry), rate-limited auth routes
 - **Items** — CRUD for coins, tokens, medals, banknotes, etc., scoped to the signed-in user
-- **Images** — obverse, reverse, and additional photos stored in GridFS; resized with `sharp` (max 1200px JPEG)
+- **Images** — obverse, reverse, and additional photos stored in GridFS; resized with `sharp` (max 1200px JPEG). Attach via file browse or **clipboard paste** (Ctrl+V / Paste button; HTTPS or localhost required for clipboard API)
 - **Composition** — metal rows (gold, silver, copper, platinum, palladium, nickel) with percent and purity
 - **Melt value** — troy-oz weight × spot price, cached ~60 minutes in MongoDB
 
