@@ -48,8 +48,30 @@ const itemSchema = new mongoose.Schema(
     grade: { type: String, trim: true, default: '' },
     condition: { type: String, trim: true, default: '' },
     catalogRefs: [{ type: String, trim: true }],
+    /** Canonical weight used for melt-value math */
     weightGrams: { type: Number, min: 0 },
+    /** Display/entry unit preference: grams or troy ounces */
+    weightUnit: {
+      type: String,
+      enum: ['g', 'oz t'],
+      default: 'g',
+    },
+    /** Canonical diameter in millimeters */
     diameterMm: { type: Number, min: 0 },
+    /** Display/entry unit preference: mm or inches */
+    diameterUnit: {
+      type: String,
+      enum: ['mm', 'in'],
+      default: 'mm',
+    },
+    /** Canonical thickness in millimeters */
+    thicknessMm: { type: Number, min: 0 },
+    /** Display/entry unit preference: mm or inches */
+    thicknessUnit: {
+      type: String,
+      enum: ['mm', 'in'],
+      default: 'mm',
+    },
     composition: [compositionSchema],
     purchasePrice: { type: Number, min: 0 },
     purchaseDate: { type: Date },

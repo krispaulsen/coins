@@ -56,7 +56,7 @@ export default function CompositionEditor({ value = [], onChange }) {
               type="number"
               min="0"
               max="100"
-              step="0.1"
+              step="0.01"
               value={row.percent}
               onChange={(e) => updateRow(index, 'percent', Number(e.target.value))}
               className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2"

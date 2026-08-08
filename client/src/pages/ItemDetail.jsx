@@ -133,8 +133,30 @@ export default function ItemDetail() {
                 ['Mint', item.mint],
                 ['Grade', item.grade],
                 ['Condition', item.condition],
-                ['Weight', item.weightGrams ? `${item.weightGrams} g` : ''],
-                ['Diameter', item.diameterMm ? `${item.diameterMm} mm` : ''],
+                [
+                  'Weight',
+                  item.weightGrams != null
+                    ? item.weightUnit === 'oz t'
+                      ? `${Number((item.weightGrams / 31.1034768).toFixed(6))} oz t (${item.weightGrams} g)`
+                      : `${item.weightGrams} g`
+                    : '',
+                ],
+                [
+                  'Diameter',
+                  item.diameterMm != null
+                    ? item.diameterUnit === 'in'
+                      ? `${Number((item.diameterMm / 25.4).toFixed(6))} in (${item.diameterMm} mm)`
+                      : `${item.diameterMm} mm`
+                    : '',
+                ],
+                [
+                  'Thickness',
+                  item.thicknessMm != null
+                    ? item.thicknessUnit === 'in'
+                      ? `${Number((item.thicknessMm / 25.4).toFixed(6))} in (${item.thicknessMm} mm)`
+                      : `${item.thicknessMm} mm`
+                    : '',
+                ],
                 ['Purchase price', item.purchasePrice ? `$${item.purchasePrice}` : ''],
                 ['Catalog refs', item.catalogRefs?.join(', ')],
               ]
