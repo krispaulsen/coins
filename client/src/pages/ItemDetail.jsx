@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../api/client.js';
 import Layout from '../components/Layout.jsx';
@@ -14,7 +14,7 @@ export default function ItemDetail() {
   const [recalculating, setRecalculating] = useState(false);
   const [error, setError] = useState('');
 
-  const loadItem = async () => {
+  const loadItem = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -25,11 +25,11 @@ export default function ItemDetail() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
     loadItem();
-  }, [id]);
+  }, [loadItem]);
 
   const handleDelete = async () => {
     if (!window.confirm('Delete this item permanently?')) return;
