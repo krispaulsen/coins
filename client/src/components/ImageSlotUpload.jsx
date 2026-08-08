@@ -25,6 +25,8 @@ export default function ImageSlotUpload({ itemId, imageUrls, onUpdated }) {
   };
 
   const removeImage = async (fileId) => {
+    if (!window.confirm('Remove this image permanently?')) return;
+
     setError('');
     try {
       const res = await api.delete(`/items/${itemId}/images/${fileId}`);
@@ -35,27 +37,32 @@ export default function ImageSlotUpload({ itemId, imageUrls, onUpdated }) {
   };
 
   const slots = [
-    { key: 'obverse', label: 'Obverse', url: imageUrls?.obverse, fileId: null },
-    { key: 'reverse', label: 'Reverse', url: imageUrls?.reverse, fileId: null },
+    { key: 'obverse', label: 'Obverse' },
+    { key: 'reverse', label: 'Reverse' },
   ];
 
   return (
     <div className="space-y-4">
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {slots.map(({ key, label, url }) => (
+      <div className="flex gap-4">
+        {slots.map(({ key, label }) => (
           <div key={key} className="space-y-2">
-            <p className="text-sm font-medium text-slate-300">{label}</p>
-            <AuthImage src={url} alt={label} className="aspect-square w-full rounded-lg object-cover" />
             <label className="inline-block cursor-pointer rounded-md border border-slate-700 px-3 py-2 text-sm hover:border-amber-500">
-              {uploading === key ? 'Uploading...' : `Upload ${label}`}
+              {uploading === key
+                ? 'Uploading...'
+                : imageUrls?.[key]
+                  ? `Replace ${label}`
+                  : `Upload ${label}`}
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 className="hidden"
                 disabled={!!uploading}
-                onChange={(e) => upload(key, e.target.files?.[0])}
+                onChange={(e) => {
+                  upload(key, e.target.files?.[0]);
+                  e.target.value = '';
+                }}
               />
             </label>
           </div>
@@ -72,7 +79,10 @@ export default function ImageSlotUpload({ itemId, imageUrls, onUpdated }) {
               accept="image/jpeg,image/png,image/webp"
               className="hidden"
               disabled={!!uploading}
-              onChange={(e) => upload('additional', e.target.files?.[0])}
+              onChange={(e) => {
+                upload('additional', e.target.files?.[0]);
+                e.target.value = '';
+              }}
             />
           </label>
         </div>
@@ -81,11 +91,19 @@ export default function ImageSlotUpload({ itemId, imageUrls, onUpdated }) {
             const fileId = url.split('/').pop();
             return (
               <div key={url} className="relative">
-                <AuthImage src={url} alt="Additional" className="aspect-square w-full rounded-lg object-cover" />
+                <AuthImage
+                  src={url}
+                  alt="Additional"
+                  zoomable
+                  className="aspect-square w-full rounded-lg object-cover"
+                />
                 <button
                   type="button"
-                  onClick={() => removeImage(fileId)}
-                  className="absolute right-2 top-2 rounded bg-slate-950/80 px-2 py-1 text-xs text-red-400"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeImage(fileId);
+                  }}
+                  className="absolute right-2 top-2 z-10 rounded bg-slate-950/80 px-2 py-1 text-xs text-red-400 hover:bg-slate-950"
                 >
                   Remove
                 </button>

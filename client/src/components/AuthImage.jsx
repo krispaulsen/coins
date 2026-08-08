@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 import { fetchImageBlob } from '../api/client.js';
+import ImageLightbox from './ImageLightbox.jsx';
 
-export default function AuthImage({ src, alt, className }) {
+export default function AuthImage({ src, alt, className, zoomable = false }) {
   const [blobUrl, setBlobUrl] = useState(null);
   const [error, setError] = useState(false);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (!src) {
       setBlobUrl(null);
       setError(false);
+      setOpen(false);
       return undefined;
     }
 
@@ -16,6 +19,7 @@ export default function AuthImage({ src, alt, className }) {
     let objectUrl;
     setBlobUrl(null);
     setError(false);
+    setOpen(false);
 
     fetchImageBlob(src)
       .then((blob) => {
@@ -67,5 +71,36 @@ export default function AuthImage({ src, alt, className }) {
     );
   }
 
-  return <img src={blobUrl} alt={alt} className={className} />;
+  const img = (
+    <img
+      src={blobUrl}
+      alt={alt}
+      className={className}
+    />
+  );
+
+  if (!zoomable) {
+    return img;
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="block w-full cursor-zoom-in border-0 bg-transparent p-0 text-left"
+        title="View full size"
+        aria-label={`View full size: ${alt || 'image'}`}
+      >
+        {img}
+      </button>
+      {open && (
+        <ImageLightbox
+          src={blobUrl}
+          alt={alt}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
 }

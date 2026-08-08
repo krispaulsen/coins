@@ -110,6 +110,7 @@ export default function ItemDetail() {
               <AuthImage
                 src={item.imageUrls?.obverse}
                 alt="Obverse"
+                zoomable
                 className="aspect-square w-full rounded-xl object-cover"
               />
             </div>
@@ -118,26 +119,11 @@ export default function ItemDetail() {
               <AuthImage
                 src={item.imageUrls?.reverse}
                 alt="Reverse"
+                zoomable
                 className="aspect-square w-full rounded-xl object-cover"
               />
             </div>
           </div>
-
-          {(item.imageUrls?.additional || []).length > 0 && (
-            <div>
-              <p className="mb-2 text-sm text-slate-400">Additional images</p>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {item.imageUrls.additional.map((url) => (
-                  <AuthImage
-                    key={url}
-                    src={url}
-                    alt="Additional"
-                    className="aspect-square w-full rounded-lg object-cover"
-                  />
-                ))}
-              </div>
-            </div>
-          )}
 
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
             <h2 className="mb-4 font-semibold">Details</h2>
