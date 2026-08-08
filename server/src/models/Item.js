@@ -1,0 +1,70 @@
+import mongoose from 'mongoose';
+
+const compositionSchema = new mongoose.Schema(
+  {
+    metal: {
+      type: String,
+      required: true,
+      enum: ['gold', 'silver', 'copper', 'platinum', 'palladium', 'nickel'],
+    },
+    percent: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 100,
+    },
+    purity: {
+      type: Number,
+      required: true,
+      min: 0,
+      max: 1,
+    },
+  },
+  { _id: false }
+);
+
+const itemSchema = new mongoose.Schema(
+  {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    itemType: {
+      type: String,
+      enum: ['coin', 'token', 'medal', 'banknote', 'other'],
+      default: 'coin',
+    },
+    country: { type: String, trim: true, default: '' },
+    year: { type: Number },
+    denomination: { type: String, trim: true, default: '' },
+    mint: { type: String, trim: true, default: '' },
+    grade: { type: String, trim: true, default: '' },
+    condition: { type: String, trim: true, default: '' },
+    catalogRefs: [{ type: String, trim: true }],
+    weightGrams: { type: Number, min: 0 },
+    diameterMm: { type: Number, min: 0 },
+    composition: [compositionSchema],
+    purchasePrice: { type: Number, min: 0 },
+    purchaseDate: { type: Date },
+    notes: { type: String, trim: true, default: '' },
+    images: {
+      obverseFileId: { type: mongoose.Schema.Types.ObjectId },
+      reverseFileId: { type: mongoose.Schema.Types.ObjectId },
+      additionalFileIds: [{ type: mongoose.Schema.Types.ObjectId }],
+    },
+    metalValueUsd: { type: Number, default: 0 },
+    metalValueUpdatedAt: { type: Date },
+  },
+  { timestamps: true }
+);
+
+itemSchema.index({ userId: 1, updatedAt: -1 });
+
+export default mongoose.model('Item', itemSchema);
