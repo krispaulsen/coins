@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import api from '../api/client.js';
 import Layout from '../components/Layout.jsx';
 import CompositionEditor from '../components/CompositionEditor.jsx';
@@ -10,6 +10,7 @@ const MM_PER_INCH = 25.4;
 const emptyForm = {
   title: '',
   itemType: 'coin',
+  setKind: '',
   country: '',
   year: '',
   denomination: '',
@@ -28,6 +29,15 @@ const emptyForm = {
   notes: '',
   composition: [{ metal: 'silver', percent: 90, purity: 0.9 }],
 };
+
+const ITEM_TYPE_OPTIONS = ['coin', 'token', 'medal', 'banknote', 'set', 'other'];
+
+const SET_KIND_OPTIONS = [
+  { value: 'proof', label: 'Proof set' },
+  { value: 'mint', label: 'Mint set' },
+  { value: 'prestige', label: 'Prestige set' },
+  { value: 'custom', label: 'Custom group' },
+];
 
 /** Convert stored grams into the unit used when the item was entered. */
 function gramsToDisplayWeight(weightGrams, weightUnit) {
@@ -150,52 +160,108 @@ const CONDITION_OPTIONS = [
 
 export default function ItemForm() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const parentSetIdParam = searchParams.get('setId') || '';
   const isEdit = Boolean(id);
   const navigate = useNavigate();
   const [form, setForm] = useState(emptyForm);
-  const [loading, setLoading] = useState(isEdit);
+  const [parentSet, setParentSet] = useState(null);
+  const [parentSetId, setParentSetId] = useState(parentSetIdParam);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (!isEdit) return;
+  const isSet = form.itemType === 'set';
 
-    api
-      .get(`/items/${id}`)
-      .then((res) => {
-        const item = res.data;
-        const weightUnit = item.weightUnit === 'oz t' ? 'oz t' : 'g';
-        const diameterUnit = item.diameterUnit === 'in' ? 'in' : 'mm';
-        const thicknessUnit = item.thicknessUnit === 'in' ? 'in' : 'mm';
-        setForm({
-          title: item.title || '',
-          itemType: item.itemType || 'coin',
-          country: item.country || '',
-          year: item.year || '',
-          denomination: item.denomination || '',
-          mint: item.mint || '',
-          grade: item.grade || '',
-          condition: item.condition || '',
-          catalogRefs: (item.catalogRefs || []).join(', '),
-          weight: gramsToDisplayWeight(item.weightGrams, weightUnit),
-          weightUnit,
-          diameter: mmToDisplayLength(item.diameterMm, diameterUnit),
-          diameterUnit,
-          thickness: mmToDisplayLength(item.thicknessMm, thicknessUnit),
-          thicknessUnit,
-          purchasePrice: item.purchasePrice ?? '',
-          purchaseDate: item.purchaseDate
-            ? new Date(item.purchaseDate).toISOString().slice(0, 10)
-            : '',
-          notes: item.notes || '',
-          composition: item.composition?.length
-            ? item.composition
-            : [{ metal: 'silver', percent: 90, purity: 0.9 }],
-        });
-      })
-      .catch((err) => setError(err.response?.data?.error || 'Failed to load item'))
-      .finally(() => setLoading(false));
-  }, [id, isEdit]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError('');
+      try {
+        if (isEdit) {
+          const res = await api.get(`/items/${id}`);
+          if (cancelled) return;
+          const item = res.data;
+          const weightUnit = item.weightUnit === 'oz t' ? 'oz t' : 'g';
+          const diameterUnit = item.diameterUnit === 'in' ? 'in' : 'mm';
+          const thicknessUnit = item.thicknessUnit === 'in' ? 'in' : 'mm';
+          setForm({
+            title: item.title || '',
+            itemType: item.itemType || 'coin',
+            setKind: item.setKind || '',
+            country: item.country || '',
+            year: item.year || '',
+            denomination: item.denomination || '',
+            mint: item.mint || '',
+            grade: item.grade || '',
+            condition: item.condition || '',
+            catalogRefs: (item.catalogRefs || []).join(', '),
+            weight: gramsToDisplayWeight(item.weightGrams, weightUnit),
+            weightUnit,
+            diameter: mmToDisplayLength(item.diameterMm, diameterUnit),
+            diameterUnit,
+            thickness: mmToDisplayLength(item.thicknessMm, thicknessUnit),
+            thicknessUnit,
+            purchasePrice: item.purchasePrice ?? '',
+            purchaseDate: item.purchaseDate
+              ? new Date(item.purchaseDate).toISOString().slice(0, 10)
+              : '',
+            notes: item.notes || '',
+            composition: item.composition?.length
+              ? item.composition
+              : [{ metal: 'silver', percent: 90, purity: 0.9 }],
+          });
+          setParentSetId(item.setId || '');
+          setParentSet(item.parentSet || null);
+        } else if (parentSetIdParam) {
+          const res = await api.get(`/items/${parentSetIdParam}`);
+          if (cancelled) return;
+          const set = res.data;
+          if (set.itemType !== 'set') {
+            setError('Parent item is not a set');
+            setParentSetId('');
+          } else {
+            setParentSet({
+              _id: set._id,
+              title: set.title,
+              year: set.year,
+              setKind: set.setKind,
+            });
+            setParentSetId(set._id);
+            setForm((prev) => ({
+              ...prev,
+              itemType: 'coin',
+              country: set.country || '',
+              year: set.year || '',
+              mint: set.mint || '',
+              condition:
+                set.setKind === 'proof'
+                  ? 'Proof'
+                  : set.condition || prev.condition,
+              setKind: '',
+            }));
+          }
+        } else {
+          setForm(emptyForm);
+          setParentSet(null);
+          setParentSetId('');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.response?.data?.error || 'Failed to load form data');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isEdit, parentSetIdParam]);
 
   const updateField = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -240,29 +306,42 @@ export default function ItemForm() {
     });
   };
 
-  const buildPayload = () => ({
-    title: form.title,
-    itemType: form.itemType,
-    country: form.country,
-    year: form.year ? Number(form.year) : undefined,
-    denomination: form.denomination,
-    mint: form.mint,
-    grade: form.grade,
-    condition: form.condition,
-    catalogRefs: form.catalogRefs
-      ? form.catalogRefs.split(',').map((s) => s.trim()).filter(Boolean)
-      : [],
-    weightGrams: displayWeightToGrams(form.weight, form.weightUnit),
-    weightUnit: form.weightUnit === 'oz t' ? 'oz t' : 'g',
-    diameterMm: displayLengthToMm(form.diameter, form.diameterUnit),
-    diameterUnit: form.diameterUnit === 'in' ? 'in' : 'mm',
-    thicknessMm: displayLengthToMm(form.thickness, form.thicknessUnit),
-    thicknessUnit: form.thicknessUnit === 'in' ? 'in' : 'mm',
-    purchasePrice: form.purchasePrice ? Number(form.purchasePrice) : undefined,
-    purchaseDate: form.purchaseDate || undefined,
-    notes: form.notes,
-    composition: form.composition,
-  });
+  const buildPayload = () => {
+    const isSetType = form.itemType === 'set';
+    const payload = {
+      title: form.title,
+      itemType: form.itemType,
+      setKind: isSetType ? form.setKind || 'custom' : '',
+      country: form.country,
+      year: form.year ? Number(form.year) : undefined,
+      denomination: isSetType ? '' : form.denomination,
+      mint: form.mint,
+      grade: isSetType ? '' : form.grade,
+      condition: form.condition,
+      catalogRefs: form.catalogRefs
+        ? form.catalogRefs.split(',').map((s) => s.trim()).filter(Boolean)
+        : [],
+      purchasePrice: form.purchasePrice ? Number(form.purchasePrice) : undefined,
+      purchaseDate: form.purchaseDate || undefined,
+      notes: form.notes,
+      setId: isSetType ? null : parentSetId || null,
+    };
+
+    if (!isSetType) {
+      payload.weightGrams = displayWeightToGrams(form.weight, form.weightUnit);
+      payload.weightUnit = form.weightUnit === 'oz t' ? 'oz t' : 'g';
+      payload.diameterMm = displayLengthToMm(form.diameter, form.diameterUnit);
+      payload.diameterUnit = form.diameterUnit === 'in' ? 'in' : 'mm';
+      payload.thicknessMm = displayLengthToMm(form.thickness, form.thicknessUnit);
+      payload.thicknessUnit = form.thicknessUnit === 'in' ? 'in' : 'mm';
+      payload.composition = form.composition;
+    } else {
+      payload.weightGrams = undefined;
+      payload.composition = [];
+    }
+
+    return payload;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -274,13 +353,24 @@ export default function ItemForm() {
       const res = isEdit
         ? await api.put(`/items/${id}`, payload)
         : await api.post('/items', payload);
-      navigate(`/items/${res.data._id}`);
+      // After adding a member, return to the set; otherwise open the item
+      if (!isEdit && parentSetId && form.itemType !== 'set') {
+        navigate(`/items/${parentSetId}`);
+      } else {
+        navigate(`/items/${res.data._id}`);
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Save failed');
     } finally {
       setSaving(false);
     }
   };
+
+  const cancelTo = isEdit
+    ? `/items/${id}`
+    : parentSetId
+      ? `/items/${parentSetId}`
+      : '/';
 
   if (loading) {
     return (
@@ -293,12 +383,28 @@ export default function ItemForm() {
   return (
     <Layout>
       <div className="mb-6">
-        <Link to={isEdit ? `/items/${id}` : '/'} className="text-sm text-slate-400 hover:text-white">
+        <Link to={cancelTo} className="text-sm text-slate-400 hover:text-white">
           ← Cancel
         </Link>
         <h1 className="mt-2 text-2xl font-semibold">
-          {isEdit ? 'Edit Item' : 'Add Item'}
+          {isEdit
+            ? isSet
+              ? 'Edit Set'
+              : 'Edit Item'
+            : isSet
+              ? 'Add Set'
+              : parentSet
+                ? 'Add Coin to Set'
+                : 'Add Item'}
         </h1>
+        {parentSet && !isSet && (
+          <p className="mt-1 text-sm text-slate-400">
+            Part of{' '}
+            <Link to={`/items/${parentSet._id}`} className="text-amber-400 hover:text-amber-300">
+              {parentSet.title}
+            </Link>
+          </p>
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -311,6 +417,11 @@ export default function ItemForm() {
               required
               value={form.title}
               onChange={(e) => updateField('title', e.target.value)}
+              placeholder={
+                isSet
+                  ? 'e.g. 2024 United States Proof Set'
+                  : 'e.g. 2024 Kennedy Half Dollar'
+              }
               className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
             />
           </label>
@@ -318,25 +429,68 @@ export default function ItemForm() {
             <span className="mb-1 block text-slate-400">Type</span>
             <select
               value={form.itemType}
-              onChange={(e) => updateField('itemType', e.target.value)}
-              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+              onChange={(e) => {
+                const next = e.target.value;
+                setForm((prev) => ({
+                  ...prev,
+                  itemType: next,
+                  setKind:
+                    next === 'set'
+                      ? prev.setKind || 'proof'
+                      : '',
+                }));
+              }}
+              disabled={Boolean(parentSetId) && !isEdit}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 disabled:opacity-60"
             >
-              {['coin', 'token', 'medal', 'banknote', 'other'].map((type) => (
+              {ITEM_TYPE_OPTIONS.filter((type) => {
+                // Don't offer "set" when adding a member under a set
+                if (parentSetId && !isEdit && type === 'set') return false;
+                return true;
+              }).map((type) => (
                 <option key={type} value={type}>
                   {type}
                 </option>
               ))}
             </select>
           </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-slate-400">Year</span>
-            <input
-              type="number"
-              value={form.year}
-              onChange={(e) => updateField('year', e.target.value)}
-              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
-            />
-          </label>
+          {isSet ? (
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-400">Set kind</span>
+              <select
+                value={form.setKind || 'proof'}
+                onChange={(e) => updateField('setKind', e.target.value)}
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+              >
+                {SET_KIND_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-400">Year</span>
+              <input
+                type="number"
+                value={form.year}
+                onChange={(e) => updateField('year', e.target.value)}
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+              />
+            </label>
+          )}
+          {isSet && (
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-400">Year</span>
+              <input
+                type="number"
+                value={form.year}
+                onChange={(e) => updateField('year', e.target.value)}
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+              />
+            </label>
+          )}
           <label className="text-sm">
             <span className="mb-1 block text-slate-400">Country</span>
             <input
@@ -351,20 +505,22 @@ export default function ItemForm() {
               ))}
             </datalist>
           </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-slate-400">Denomination</span>
-            <input
-              list="denomination-options"
-              value={form.denomination}
-              onChange={(e) => updateField('denomination', e.target.value)}
-              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
-            />
-            <datalist id="denomination-options">
-              {DENOMINATION_OPTIONS.map((option) => (
-                <option key={option} value={option} />
-              ))}
-            </datalist>
-          </label>
+          {!isSet && (
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-400">Denomination</span>
+              <input
+                list="denomination-options"
+                value={form.denomination}
+                onChange={(e) => updateField('denomination', e.target.value)}
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+              />
+              <datalist id="denomination-options">
+                {DENOMINATION_OPTIONS.map((option) => (
+                  <option key={option} value={option} />
+                ))}
+              </datalist>
+            </label>
+          )}
           <label className="text-sm">
             <span className="mb-1 block text-slate-400">Mint</span>
             <input
@@ -379,21 +535,23 @@ export default function ItemForm() {
               ))}
             </datalist>
           </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-slate-400">Grade</span>
-            <input
-              list="grade-options"
-              value={form.grade}
-              onChange={(e) => updateField('grade', e.target.value)}
-              placeholder="e.g. MS-65, VF-20"
-              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
-            />
-            <datalist id="grade-options">
-              {GRADE_OPTIONS.map((option) => (
-                <option key={option} value={option} />
-              ))}
-            </datalist>
-          </label>
+          {!isSet && (
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-400">Grade</span>
+              <input
+                list="grade-options"
+                value={form.grade}
+                onChange={(e) => updateField('grade', e.target.value)}
+                placeholder="e.g. MS-65, PR-69"
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+              />
+              <datalist id="grade-options">
+                {GRADE_OPTIONS.map((option) => (
+                  <option key={option} value={option} />
+                ))}
+              </datalist>
+            </label>
+          )}
           <label className="text-sm">
             <span className="mb-1 block text-slate-400">Condition</span>
             <input
@@ -409,82 +567,88 @@ export default function ItemForm() {
               ))}
             </datalist>
           </label>
-          <div className="text-sm">
-            <span className="mb-1 block text-slate-400">Weight</span>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                step="any"
-                min="0"
-                value={form.weight}
-                onChange={(e) => updateField('weight', e.target.value)}
-                placeholder={form.weightUnit === 'oz t' ? 'e.g. 1' : 'e.g. 31.103'}
-                className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
-              />
-              <select
-                value={form.weightUnit}
-                onChange={(e) => changeWeightUnit(e.target.value)}
-                className="w-28 shrink-0 rounded-md border border-slate-700 bg-slate-950 px-2 py-2"
-                aria-label="Weight unit"
-              >
-                <option value="g">grams</option>
-                <option value="oz t">oz t</option>
-              </select>
-            </div>
-            <p className="mt-1 text-xs text-slate-500">
-              {form.weightUnit === 'oz t'
-                ? 'Troy ounces (oz t). Melt value converts to grams automatically.'
-                : 'Grams (g). Choose oz t for weights listed in troy ounces.'}
-            </p>
-          </div>
-          <div className="text-sm">
-            <span className="mb-1 block text-slate-400">Diameter</span>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                step="any"
-                min="0"
-                value={form.diameter}
-                onChange={(e) => updateField('diameter', e.target.value)}
-                placeholder={form.diameterUnit === 'in' ? 'e.g. 1.5' : 'e.g. 38.1'}
-                className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
-              />
-              <select
-                value={form.diameterUnit}
-                onChange={(e) => changeDiameterUnit(e.target.value)}
-                className="w-28 shrink-0 rounded-md border border-slate-700 bg-slate-950 px-2 py-2"
-                aria-label="Diameter unit"
-              >
-                <option value="mm">mm</option>
-                <option value="in">in</option>
-              </select>
-            </div>
-          </div>
-          <div className="text-sm">
-            <span className="mb-1 block text-slate-400">Thickness</span>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                step="any"
-                min="0"
-                value={form.thickness}
-                onChange={(e) => updateField('thickness', e.target.value)}
-                placeholder={form.thicknessUnit === 'in' ? 'e.g. 0.1' : 'e.g. 2.5'}
-                className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
-              />
-              <select
-                value={form.thicknessUnit}
-                onChange={(e) => changeThicknessUnit(e.target.value)}
-                className="w-28 shrink-0 rounded-md border border-slate-700 bg-slate-950 px-2 py-2"
-                aria-label="Thickness unit"
-              >
-                <option value="mm">mm</option>
-                <option value="in">in</option>
-              </select>
-            </div>
-          </div>
+          {!isSet && (
+            <>
+              <div className="text-sm">
+                <span className="mb-1 block text-slate-400">Weight</span>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={form.weight}
+                    onChange={(e) => updateField('weight', e.target.value)}
+                    placeholder={form.weightUnit === 'oz t' ? 'e.g. 1' : 'e.g. 31.103'}
+                    className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+                  />
+                  <select
+                    value={form.weightUnit}
+                    onChange={(e) => changeWeightUnit(e.target.value)}
+                    className="w-28 shrink-0 rounded-md border border-slate-700 bg-slate-950 px-2 py-2"
+                    aria-label="Weight unit"
+                  >
+                    <option value="g">grams</option>
+                    <option value="oz t">oz t</option>
+                  </select>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {form.weightUnit === 'oz t'
+                    ? 'Troy ounces (oz t). Melt value converts to grams automatically.'
+                    : 'Grams (g). Choose oz t for weights listed in troy ounces.'}
+                </p>
+              </div>
+              <div className="text-sm">
+                <span className="mb-1 block text-slate-400">Diameter</span>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={form.diameter}
+                    onChange={(e) => updateField('diameter', e.target.value)}
+                    placeholder={form.diameterUnit === 'in' ? 'e.g. 1.5' : 'e.g. 38.1'}
+                    className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+                  />
+                  <select
+                    value={form.diameterUnit}
+                    onChange={(e) => changeDiameterUnit(e.target.value)}
+                    className="w-28 shrink-0 rounded-md border border-slate-700 bg-slate-950 px-2 py-2"
+                    aria-label="Diameter unit"
+                  >
+                    <option value="mm">mm</option>
+                    <option value="in">in</option>
+                  </select>
+                </div>
+              </div>
+              <div className="text-sm">
+                <span className="mb-1 block text-slate-400">Thickness</span>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={form.thickness}
+                    onChange={(e) => updateField('thickness', e.target.value)}
+                    placeholder={form.thicknessUnit === 'in' ? 'e.g. 0.1' : 'e.g. 2.5'}
+                    className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+                  />
+                  <select
+                    value={form.thicknessUnit}
+                    onChange={(e) => changeThicknessUnit(e.target.value)}
+                    className="w-28 shrink-0 rounded-md border border-slate-700 bg-slate-950 px-2 py-2"
+                    aria-label="Thickness unit"
+                  >
+                    <option value="mm">mm</option>
+                    <option value="in">in</option>
+                  </select>
+                </div>
+              </div>
+            </>
+          )}
           <label className="text-sm">
-            <span className="mb-1 block text-slate-400">Purchase price (USD)</span>
+            <span className="mb-1 block text-slate-400">
+              Purchase price (USD){isSet ? ' — whole set' : ''}
+            </span>
             <input
               type="number"
               step="0.01"
@@ -522,19 +686,36 @@ export default function ItemForm() {
           </label>
         </div>
 
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
-          <CompositionEditor
-            value={form.composition}
-            onChange={(composition) => updateField('composition', composition)}
-          />
-        </div>
+        {!isSet && (
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+            <CompositionEditor
+              value={form.composition}
+              onChange={(composition) => updateField('composition', composition)}
+            />
+          </div>
+        )}
+
+        {isSet && (
+          <p className="text-sm text-slate-400">
+            After creating the set, add each coin (denomination, weight, composition) from the set
+            detail page. Melt value is the sum of the coins in the set.
+          </p>
+        )}
 
         <button
           type="submit"
           disabled={saving}
           className="rounded-md bg-amber-500 px-5 py-2 font-medium text-slate-950 hover:bg-amber-400 disabled:opacity-50"
         >
-          {saving ? 'Saving...' : isEdit ? 'Save changes' : 'Create item'}
+          {saving
+            ? 'Saving...'
+            : isEdit
+              ? 'Save changes'
+              : isSet
+                ? 'Create set'
+                : parentSet
+                  ? 'Add coin to set'
+                  : 'Create item'}
         </button>
       </form>
     </Layout>

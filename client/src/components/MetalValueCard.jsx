@@ -1,4 +1,11 @@
-export default function MetalValueCard({ metalValueUsd, metalValueUpdatedAt, breakdown, onRecalculate, loading }) {
+export default function MetalValueCard({
+  metalValueUsd,
+  metalValueUpdatedAt,
+  breakdown,
+  onRecalculate,
+  loading,
+  emptyMessage = 'Add weight and composition to calculate melt value.',
+}) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
       <div className="mb-4 flex items-start justify-between gap-4">
@@ -40,9 +47,7 @@ export default function MetalValueCard({ metalValueUsd, metalValueUpdatedAt, bre
           ))}
         </div>
       ) : (
-        <p className="text-sm text-slate-500">
-          Add weight and composition to calculate melt value.
-        </p>
+        <p className="text-sm text-slate-500">{emptyMessage}</p>
       )}
     </div>
   );

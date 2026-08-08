@@ -42,12 +42,13 @@ function buildImageUrls(item) {
   };
 }
 
-export function serializeItem(item, _req, breakdown = null) {
+export function serializeItem(item, _req, breakdown = null, extras = {}) {
   const obj = item.toObject ? item.toObject() : { ...item };
   return {
     ...obj,
     imageUrls: buildImageUrls(obj),
     metalBreakdown: breakdown,
+    ...extras,
   };
 }
 
@@ -65,18 +66,115 @@ function collectFileIds(item) {
   return ids;
 }
 
+/**
+ * Ensure setId (if provided) points at an owned set item.
+ * Sets cannot be nested under other sets.
+ */
+async function resolveSetId(setId, userId, { itemType } = {}) {
+  if (setId === null || setId === undefined || setId === '') {
+    return null;
+  }
+
+  if (itemType === 'set') {
+    const err = new Error('A set cannot be a member of another set');
+    err.status = 400;
+    throw err;
+  }
+
+  const parent = await Item.findOne({ _id: setId, userId });
+  if (!parent) {
+    const err = new Error('Parent set not found');
+    err.status = 404;
+    throw err;
+  }
+  if (parent.itemType !== 'set') {
+    const err = new Error('Parent item is not a set');
+    err.status = 400;
+    throw err;
+  }
+  if (parent.setId) {
+    const err = new Error('Cannot nest items under a set member');
+    err.status = 400;
+    throw err;
+  }
+
+  return parent._id;
+}
+
+/** Aggregate melt from members; persist on the set document. */
+async function refreshSetMetalValue(setItem) {
+  const members = await Item.find({
+    userId: setItem.userId,
+    setId: setItem._id,
+  }).select('metalValueUsd');
+
+  const total = members.reduce(
+    (sum, m) => sum + Number(m.metalValueUsd || 0),
+    0
+  );
+  setItem.metalValueUsd = Number(total.toFixed(2));
+  setItem.metalValueUpdatedAt = new Date();
+  await setItem.save();
+  return setItem;
+}
+
+/** After a member's melt changes, refresh its parent set total. */
+async function refreshParentSetIfAny(item) {
+  if (!item.setId) return;
+  const parent = await Item.findOne({
+    _id: item.setId,
+    userId: item.userId,
+    itemType: 'set',
+  });
+  if (parent) {
+    await refreshSetMetalValue(parent);
+  }
+}
+
+async function loadMembers(setItem) {
+  return Item.find({
+    userId: setItem.userId,
+    setId: setItem._id,
+  }).sort({ denomination: 1, title: 1 });
+}
+
 router.get('/', async (req, res, next) => {
   try {
-    const { search, page = 1, limit = 20 } = req.query;
+    const {
+      search,
+      page = 1,
+      limit = 20,
+      includeMembers,
+      setId,
+    } = req.query;
     const query = { userId: req.user.id };
+
+    // Default: top-level only (loose items + sets). Members stay under their set.
+    if (setId) {
+      query.setId = setId;
+    } else if (includeMembers !== 'true') {
+      query.$or = [{ setId: null }, { setId: { $exists: false } }];
+    }
 
     if (search) {
       const regex = new RegExp(search, 'i');
-      query.$or = [
-        { title: regex },
-        { country: regex },
-        { denomination: regex },
-      ];
+      const searchClause = {
+        $or: [
+          { title: regex },
+          { country: regex },
+          { denomination: regex },
+        ],
+      };
+      // Combine with top-level filter without clobbering $or
+      if (query.$or && !setId && includeMembers !== 'true') {
+        query.$and = [
+          { $or: query.$or },
+          searchClause,
+        ];
+        delete query.$or;
+      } else {
+        Object.assign(query, searchClause);
+      }
     }
 
     const skip = (Number(page) - 1) * Number(limit);
@@ -85,8 +183,49 @@ router.get('/', async (req, res, next) => {
       Item.countDocuments(query),
     ]);
 
+    // For set cards on the dashboard: attach memberCount and aggregated melt
+    const setIds = items
+      .filter((i) => i.itemType === 'set')
+      .map((i) => i._id);
+
+    let memberStats = {};
+    if (setIds.length) {
+      // setIds already scoped to this user via the list query above
+      const stats = await Item.aggregate([
+        { $match: { setId: { $in: setIds } } },
+        {
+          $group: {
+            _id: '$setId',
+            memberCount: { $sum: 1 },
+            metalValueUsd: { $sum: { $ifNull: ['$metalValueUsd', 0] } },
+          },
+        },
+      ]);
+      memberStats = Object.fromEntries(
+        stats.map((s) => [
+          s._id.toString(),
+          {
+            memberCount: s.memberCount,
+            metalValueUsd: Number((s.metalValueUsd || 0).toFixed(2)),
+          },
+        ])
+      );
+    }
+
     res.json({
-      items: items.map((item) => serializeItem(item, req)),
+      items: items.map((item) => {
+        const extras = {};
+        if (item.itemType === 'set') {
+          const stats = memberStats[item._id.toString()] || {
+            memberCount: 0,
+            metalValueUsd: 0,
+          };
+          extras.memberCount = stats.memberCount;
+          // Prefer live aggregate so list stays accurate without extra writes
+          extras.metalValueUsd = stats.metalValueUsd;
+        }
+        return serializeItem(item, req, null, extras);
+      }),
       pagination: {
         page: Number(page),
         limit: Number(limit),
@@ -101,8 +240,23 @@ router.get('/', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
+    const body = { ...req.body };
+    const resolvedSetId = await resolveSetId(body.setId, req.user.id, {
+      itemType: body.itemType,
+    });
+
+    if (body.itemType === 'set') {
+      body.setId = null;
+    } else {
+      body.setId = resolvedSetId;
+    }
+
+    if (body.setKind !== undefined && body.itemType !== 'set') {
+      body.setKind = '';
+    }
+
     const item = await Item.create({
-      ...req.body,
+      ...body,
       userId: req.user.id,
       images: {
         obverseFileId: null,
@@ -111,10 +265,24 @@ router.post('/', async (req, res, next) => {
       },
     });
 
+    if (item.itemType === 'set') {
+      item.metalValueUsd = 0;
+      item.metalValueUpdatedAt = new Date();
+      await item.save();
+      res.status(201).json(
+        serializeItem(item, req, [], { members: [], memberCount: 0 })
+      );
+      return;
+    }
+
     await updateItemMetalValue(item);
+    await refreshParentSetIfAny(item);
     const { breakdown } = await calculateMetalValue(item);
     res.status(201).json(serializeItem(item, req, breakdown));
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
     next(err);
   }
 });
@@ -126,8 +294,40 @@ router.get('/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Item not found' });
     }
 
+    if (item.itemType === 'set') {
+      const members = await loadMembers(item);
+      await refreshSetMetalValue(item);
+      const serializedMembers = members.map((m) => serializeItem(m, req));
+      return res.json(
+        serializeItem(item, req, null, {
+          members: serializedMembers,
+          memberCount: members.length,
+        })
+      );
+    }
+
     const { breakdown } = await calculateMetalValue(item);
-    res.json(serializeItem(item, req, breakdown));
+    let parentSet = null;
+    if (item.setId) {
+      parentSet = await Item.findOne({
+        _id: item.setId,
+        userId: req.user.id,
+      }).select('title year setKind itemType');
+    }
+
+    res.json(
+      serializeItem(item, req, breakdown, {
+        parentSet: parentSet
+          ? {
+              _id: parentSet._id,
+              title: parentSet.title,
+              year: parentSet.year,
+              setKind: parentSet.setKind,
+              itemType: parentSet.itemType,
+            }
+          : null,
+      })
+    );
   } catch (err) {
     next(err);
   }
@@ -141,11 +341,13 @@ router.put('/:id', async (req, res, next) => {
     }
 
     const allowed = [
-      'title', 'itemType', 'country', 'year', 'denomination', 'mint',
-      'grade', 'condition', 'catalogRefs', 'weightGrams', 'weightUnit',
+      'title', 'itemType', 'setKind', 'setId', 'country', 'year', 'denomination',
+      'mint', 'grade', 'condition', 'catalogRefs', 'weightGrams', 'weightUnit',
       'diameterMm', 'diameterUnit', 'thicknessMm', 'thicknessUnit',
       'composition', 'purchasePrice', 'purchaseDate', 'notes',
     ];
+
+    const previousSetId = item.setId?.toString() || null;
 
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
@@ -153,11 +355,51 @@ router.put('/:id', async (req, res, next) => {
       }
     }
 
+    if (item.itemType === 'set') {
+      item.setId = null;
+    } else if (req.body.setId !== undefined) {
+      item.setId = await resolveSetId(req.body.setId, req.user.id, {
+        itemType: item.itemType,
+      });
+    }
+
+    if (item.itemType !== 'set') {
+      item.setKind = item.setKind || '';
+    }
+
     await item.save();
+
+    if (item.itemType === 'set') {
+      await refreshSetMetalValue(item);
+      const members = await loadMembers(item);
+      return res.json(
+        serializeItem(item, req, null, {
+          members: members.map((m) => serializeItem(m, req)),
+          memberCount: members.length,
+        })
+      );
+    }
+
     await updateItemMetalValue(item);
+
+    // Refresh old and new parent sets if membership changed
+    const newSetId = item.setId?.toString() || null;
+    if (previousSetId && previousSetId !== newSetId) {
+      const oldParent = await Item.findOne({
+        _id: previousSetId,
+        userId: req.user.id,
+        itemType: 'set',
+      });
+      if (oldParent) await refreshSetMetalValue(oldParent);
+    }
+    await refreshParentSetIfAny(item);
+
     const { breakdown } = await calculateMetalValue(item);
     res.json(serializeItem(item, req, breakdown));
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
     next(err);
   }
 });
@@ -169,8 +411,41 @@ router.delete('/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Item not found' });
     }
 
+    const cascade = req.query.cascade === 'true';
+    const parentSetId = item.setId;
+
+    if (item.itemType === 'set') {
+      const members = await Item.find({
+        userId: req.user.id,
+        setId: item._id,
+      });
+
+      if (cascade) {
+        for (const member of members) {
+          await deleteFiles(collectFileIds(member));
+          await member.deleteOne();
+        }
+      } else {
+        // Unlink members so they become loose collection items
+        await Item.updateMany(
+          { userId: req.user.id, setId: item._id },
+          { $set: { setId: null } }
+        );
+      }
+    }
+
     await deleteFiles(collectFileIds(item));
     await item.deleteOne();
+
+    if (parentSetId) {
+      const parent = await Item.findOne({
+        _id: parentSetId,
+        userId: req.user.id,
+        itemType: 'set',
+      });
+      if (parent) await refreshSetMetalValue(parent);
+    }
+
     res.json({ success: true });
   } catch (err) {
     next(err);
@@ -263,7 +538,23 @@ router.post('/:id/recalculate-value', async (req, res, next) => {
       return res.status(404).json({ error: 'Item not found' });
     }
 
+    if (item.itemType === 'set') {
+      const members = await loadMembers(item);
+      for (const member of members) {
+        await updateItemMetalValue(member);
+      }
+      await refreshSetMetalValue(item);
+      const refreshedMembers = await loadMembers(item);
+      return res.json(
+        serializeItem(item, req, null, {
+          members: refreshedMembers.map((m) => serializeItem(m, req)),
+          memberCount: refreshedMembers.length,
+        })
+      );
+    }
+
     await updateItemMetalValue(item);
+    await refreshParentSetIfAny(item);
     const { breakdown } = await calculateMetalValue(item);
     res.json(serializeItem(item, req, breakdown));
   } catch (err) {

@@ -38,8 +38,28 @@ const itemSchema = new mongoose.Schema(
     },
     itemType: {
       type: String,
-      enum: ['coin', 'token', 'medal', 'banknote', 'other'],
+      enum: ['coin', 'token', 'medal', 'banknote', 'set', 'other'],
       default: 'coin',
+    },
+    /**
+     * Kind of multi-coin package when itemType is 'set'.
+     * e.g. proof, mint, prestige, custom
+     */
+    setKind: {
+      type: String,
+      enum: ['proof', 'mint', 'prestige', 'custom', ''],
+      default: '',
+      trim: true,
+    },
+    /**
+     * When set, this item is a member of a parent set (itemType 'set').
+     * Top-level items (including sets themselves) leave this null/undefined.
+     */
+    setId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Item',
+      default: null,
+      index: true,
     },
     country: { type: String, trim: true, default: '' },
     year: { type: Number },
@@ -88,5 +108,6 @@ const itemSchema = new mongoose.Schema(
 );
 
 itemSchema.index({ userId: 1, updatedAt: -1 });
+itemSchema.index({ userId: 1, setId: 1 });
 
 export default mongoose.model('Item', itemSchema);

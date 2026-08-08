@@ -69,28 +69,58 @@ export default function Dashboard() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((item) => (
-            <Link
-              key={item._id}
-              to={`/items/${item._id}`}
-              className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 transition hover:border-amber-500/50"
-            >
-              <AuthImage
-                src={item.imageUrls?.obverse || item.imageUrls?.reverse}
-                alt={item.title}
-                className="aspect-square w-full object-cover"
-              />
-              <div className="p-4">
-                <h2 className="font-medium">{item.title}</h2>
-                <p className="text-sm text-slate-400">
-                  {[item.year, item.country, item.denomination].filter(Boolean).join(' · ')}
-                </p>
-                <p className="mt-2 text-sm text-amber-400">
-                  Melt: ${Number(item.metalValueUsd || 0).toFixed(2)}
-                </p>
-              </div>
-            </Link>
-          ))}
+          {items.map((item) => {
+            const isSet = item.itemType === 'set';
+            const setLabel =
+              {
+                proof: 'Proof set',
+                mint: 'Mint set',
+                prestige: 'Prestige set',
+                custom: 'Set',
+              }[item.setKind] || (isSet ? 'Set' : null);
+
+            return (
+              <Link
+                key={item._id}
+                to={`/items/${item._id}`}
+                className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 transition hover:border-amber-500/50"
+              >
+                <div className="relative">
+                  <AuthImage
+                    src={item.imageUrls?.obverse || item.imageUrls?.reverse}
+                    alt={item.title}
+                    className="aspect-square w-full object-cover"
+                  />
+                  {isSet && (
+                    <span className="absolute left-2 top-2 rounded-md bg-amber-500/90 px-2 py-0.5 text-xs font-medium text-slate-950">
+                      {setLabel}
+                    </span>
+                  )}
+                </div>
+                <div className="p-4">
+                  <h2 className="font-medium">{item.title}</h2>
+                  <p className="text-sm text-slate-400">
+                    {isSet
+                      ? [
+                          item.year,
+                          item.country,
+                          item.memberCount != null
+                            ? `${item.memberCount} coin${item.memberCount === 1 ? '' : 's'}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')
+                      : [item.year, item.country, item.denomination]
+                          .filter(Boolean)
+                          .join(' · ')}
+                  </p>
+                  <p className="mt-2 text-sm text-amber-400">
+                    Melt: ${Number(item.metalValueUsd || 0).toFixed(2)}
+                  </p>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       )}
     </Layout>
