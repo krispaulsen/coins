@@ -52,14 +52,31 @@ coin-collection/
    mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/coin-collection?retryWrites=true&w=majority
    ```
 
-### 2. Server
+### 2. Install dependencies
+
+From the repo root (installs root tooling, server, and client):
 
 ```bash
-cd server
-cp .env.example .env
-# Edit .env: MONGODB_URI, JWT_SECRET, CLIENT_URL
-npm install
-npm run dev
+npm run install:all
+```
+
+Or install each package separately:
+
+```bash
+cd server && npm install
+cd ../client && npm install
+```
+
+### 3. Configure environment
+
+```bash
+# Server
+cp server/.env.example server/.env
+# Edit server/.env: MONGODB_URI, JWT_SECRET, CLIENT_URL
+
+# Client
+cp client/.env.example client/.env
+# VITE_API_URL=http://localhost:5000
 ```
 
 Generate a JWT secret:
@@ -72,19 +89,20 @@ Generate a JWT secret:
 openssl rand -hex 32
 ```
 
-Server defaults to `http://localhost:5000`. Health check: `GET /api/health`.
+### 4. Run server + client
 
-### 3. Client
+From the repo root:
 
 ```bash
-cd client
-cp .env.example .env
-# VITE_API_URL=http://localhost:5000
-npm install
 npm run dev
 ```
 
-App defaults to `http://localhost:5173`.
+This starts both processes with labeled output (`server` / `client`).
+
+| Process | Command alone | URL |
+|---------|---------------|-----|
+| API | `npm run dev:server` | `http://localhost:5000` (`GET /api/health`) |
+| SPA | `npm run dev:client` | `http://localhost:5173` |
 
 ### Environment variables
 
