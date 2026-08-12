@@ -329,11 +329,13 @@ export default function ItemForm() {
       payload.diameterUnit = form.diameterUnit === 'in' ? 'in' : 'mm';
       payload.thicknessMm = displayLengthToMm(form.thickness, form.thicknessUnit);
       payload.thicknessUnit = form.thicknessUnit === 'in' ? 'in' : 'mm';
-      payload.composition = (form.composition || []).map((row) => ({
-        metal: row.metal,
-        percent: row.percent === '' || row.percent == null ? 0 : Number(row.percent),
-        purity: row.purity === '' || row.purity == null ? 0 : Number(row.purity),
-      }));
+      payload.composition = (form.composition || [])
+        .map((row) => ({
+          metal: String(row.metal || '').trim().slice(0, 64),
+          percent: row.percent === '' || row.percent == null ? 0 : Number(row.percent),
+          purity: row.purity === '' || row.purity == null ? 0 : Number(row.purity),
+        }))
+        .filter((row) => row.metal);
     } else {
       payload.weightGrams = undefined;
       payload.composition = [];

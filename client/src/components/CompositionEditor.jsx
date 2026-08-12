@@ -1,4 +1,22 @@
-const METALS = ['gold', 'silver', 'copper', 'platinum', 'palladium', 'nickel'];
+/** Spot-priced metals used for melt-value calculation. */
+const SPOT_METALS = ['gold', 'silver', 'copper', 'platinum', 'palladium', 'nickel'];
+
+/**
+ * Suggested materials for the composition dropdown/datalist.
+ * Users can also type any other material freely.
+ */
+const METAL_SUGGESTIONS = [
+  ...SPOT_METALS,
+  'brass',
+  'bronze',
+  'cupronickel',
+  'zinc',
+  'tin',
+  'steel',
+  'aluminum',
+  'alloy',
+  'other',
+];
 
 /** Default first row: primary precious metal. */
 const defaultFirstRow = () => ({ metal: 'silver', percent: 90, purity: 0.999 });
@@ -24,6 +42,10 @@ function displayNumber(value) {
   return value === '' || value == null ? '' : value;
 }
 
+function normalizeMetal(value) {
+  return String(value || '').trim().slice(0, 64);
+}
+
 export default function CompositionEditor({ value = [], onChange }) {
   const rows = value.length ? value : [defaultFirstRow()];
 
@@ -42,6 +64,9 @@ export default function CompositionEditor({ value = [], onChange }) {
   };
 
   const totalPercent = rows.reduce((sum, row) => sum + Number(row.percent || 0), 0);
+  const hasNonSpotMetal = rows.some(
+    (row) => row.metal && !SPOT_METALS.includes(String(row.metal).toLowerCase())
+  );
 
   return (
     <div className="space-y-3">
@@ -59,18 +84,20 @@ export default function CompositionEditor({ value = [], onChange }) {
       {rows.map((row, index) => (
         <div key={index} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-800 p-3 sm:grid-cols-4">
           <label className="text-sm">
-            <span className="mb-1 block text-slate-400">Metal</span>
-            <select
-              value={row.metal}
-              onChange={(e) => updateRow(index, 'metal', e.target.value)}
+            <span className="mb-1 block text-slate-400">Metal / material</span>
+            <input
+              list={`metal-suggestions-${index}`}
+              value={row.metal ?? ''}
+              onChange={(e) => updateRow(index, 'metal', normalizeMetal(e.target.value))}
+              placeholder="Select or type…"
+              maxLength={64}
               className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2"
-            >
-              {METALS.map((metal) => (
-                <option key={metal} value={metal}>
-                  {metal}
-                </option>
+            />
+            <datalist id={`metal-suggestions-${index}`}>
+              {METAL_SUGGESTIONS.map((metal) => (
+                <option key={metal} value={metal} />
               ))}
-            </select>
+            </datalist>
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-slate-400">Percent</span>
@@ -111,6 +138,12 @@ export default function CompositionEditor({ value = [], onChange }) {
       <p className={`text-sm ${Math.abs(totalPercent - 100) > 0.5 ? 'text-amber-400' : 'text-slate-500'}`}>
         Total: {totalPercent.toFixed(1)}% {Math.abs(totalPercent - 100) > 0.5 && '(should be ~100%)'}
       </p>
+      {hasNonSpotMetal && (
+        <p className="text-xs text-slate-500">
+          Melt value is calculated only for gold, silver, copper, platinum, palladium, and nickel.
+          Other materials are stored for catalog purposes.
+        </p>
+      )}
     </div>
   );
 }

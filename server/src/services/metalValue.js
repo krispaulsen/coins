@@ -12,7 +12,9 @@ export async function calculateMetalValue(item) {
   let totalUsd = 0;
 
   for (const entry of item.composition) {
-    const spot = spotPrices[entry.metal];
+    // Spot prices are keyed by lowercase metal name; free-text materials have no spot.
+    const spotKey = String(entry.metal || '').toLowerCase();
+    const spot = spotPrices[spotKey];
     if (!spot) continue;
 
     const metalWeightGrams =

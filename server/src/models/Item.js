@@ -2,10 +2,17 @@ import mongoose from 'mongoose';
 
 const compositionSchema = new mongoose.Schema(
   {
+    /**
+     * Material name. Common values: gold, silver, copper, platinum, palladium,
+     * nickel, brass, bronze, cupronickel, zinc, tin, steel, aluminum, alloy, other.
+     * Free text is allowed for uncommon materials. Melt value is only calculated
+     * for metals that have a known spot price.
+     */
     metal: {
       type: String,
       required: true,
-      enum: ['gold', 'silver', 'copper', 'platinum', 'palladium', 'nickel'],
+      trim: true,
+      maxlength: 64,
     },
     percent: {
       type: Number,
