@@ -15,6 +15,7 @@ const emptyForm = {
   year: '',
   denomination: '',
   mint: '',
+  mintMark: '',
   grade: '',
   condition: '',
   catalogRefs: '',
@@ -27,7 +28,7 @@ const emptyForm = {
   purchasePrice: '',
   purchaseDate: '',
   notes: '',
-  composition: [{ metal: 'silver', percent: 90, purity: 0.9 }],
+  composition: [{ metal: 'silver', percent: 90, purity: 0.999 }],
 };
 
 const ITEM_TYPE_OPTIONS = ['coin', 'token', 'medal', 'banknote', 'set', 'other'];
@@ -88,6 +89,16 @@ const COUNTRY_OPTIONS = ['United States', 'Canada', 'Mexico'];
 const DENOMINATION_OPTIONS = ['$1', '50¢', '25¢', '10¢', '5¢', '1¢'];
 
 const MINT_OPTIONS = ['Philadelphia', 'Denver', 'San Francisco', 'West Point'];
+
+const MINT_MARK_OPTIONS = ['P', 'D', 'S', 'W'];
+
+/** Known US mint marks → facility name for auto-fill. */
+const MINT_MARK_TO_MINT = {
+  P: 'Philadelphia',
+  D: 'Denver',
+  S: 'San Francisco',
+  W: 'West Point',
+};
 
 /** Formal Sheldon-scale grades (and common proof grades) */
 const GRADE_OPTIONS = [
@@ -195,6 +206,7 @@ export default function ItemForm() {
             year: item.year || '',
             denomination: item.denomination || '',
             mint: item.mint || '',
+            mintMark: item.mintMark || '',
             grade: item.grade || '',
             condition: item.condition || '',
             catalogRefs: (item.catalogRefs || []).join(', '),
@@ -211,7 +223,7 @@ export default function ItemForm() {
             notes: item.notes || '',
             composition: item.composition?.length
               ? item.composition
-              : [{ metal: 'silver', percent: 90, purity: 0.9 }],
+              : [{ metal: 'silver', percent: 90, purity: 0.999 }],
           });
           setParentSetId(item.setId || '');
           setParentSet(item.parentSet || null);
@@ -267,43 +279,25 @@ export default function ItemForm() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  /** Switching unit keeps the same physical weight by converting the number. */
+  /** Unit change only switches the label; the typed number is left as-is. */
   const changeWeightUnit = (nextUnit) => {
-    setForm((prev) => {
-      if (prev.weightUnit === nextUnit) return prev;
-      const grams = displayWeightToGrams(prev.weight, prev.weightUnit);
-      return {
-        ...prev,
-        weightUnit: nextUnit,
-        weight: grams == null ? '' : gramsToDisplayWeight(grams, nextUnit),
-      };
-    });
+    setForm((prev) =>
+      prev.weightUnit === nextUnit ? prev : { ...prev, weightUnit: nextUnit }
+    );
   };
 
-  /** Switching unit keeps the same physical diameter by converting the number. */
+  /** Unit change only switches the label; the typed number is left as-is. */
   const changeDiameterUnit = (nextUnit) => {
-    setForm((prev) => {
-      if (prev.diameterUnit === nextUnit) return prev;
-      const mm = displayLengthToMm(prev.diameter, prev.diameterUnit);
-      return {
-        ...prev,
-        diameterUnit: nextUnit,
-        diameter: mm == null ? '' : mmToDisplayLength(mm, nextUnit),
-      };
-    });
+    setForm((prev) =>
+      prev.diameterUnit === nextUnit ? prev : { ...prev, diameterUnit: nextUnit }
+    );
   };
 
-  /** Switching unit keeps the same physical thickness by converting the number. */
+  /** Unit change only switches the label; the typed number is left as-is. */
   const changeThicknessUnit = (nextUnit) => {
-    setForm((prev) => {
-      if (prev.thicknessUnit === nextUnit) return prev;
-      const mm = displayLengthToMm(prev.thickness, prev.thicknessUnit);
-      return {
-        ...prev,
-        thicknessUnit: nextUnit,
-        thickness: mm == null ? '' : mmToDisplayLength(mm, nextUnit),
-      };
-    });
+    setForm((prev) =>
+      prev.thicknessUnit === nextUnit ? prev : { ...prev, thicknessUnit: nextUnit }
+    );
   };
 
   const buildPayload = () => {
@@ -316,6 +310,7 @@ export default function ItemForm() {
       year: form.year ? Number(form.year) : undefined,
       denomination: isSetType ? '' : form.denomination,
       mint: form.mint,
+      mintMark: form.mintMark,
       grade: isSetType ? '' : form.grade,
       condition: form.condition,
       catalogRefs: form.catalogRefs
@@ -334,7 +329,11 @@ export default function ItemForm() {
       payload.diameterUnit = form.diameterUnit === 'in' ? 'in' : 'mm';
       payload.thicknessMm = displayLengthToMm(form.thickness, form.thicknessUnit);
       payload.thicknessUnit = form.thicknessUnit === 'in' ? 'in' : 'mm';
-      payload.composition = form.composition;
+      payload.composition = (form.composition || []).map((row) => ({
+        metal: row.metal,
+        percent: row.percent === '' || row.percent == null ? 0 : Number(row.percent),
+        purity: row.purity === '' || row.purity == null ? 0 : Number(row.purity),
+      }));
     } else {
       payload.weightGrams = undefined;
       payload.composition = [];
@@ -522,6 +521,29 @@ export default function ItemForm() {
             </label>
           )}
           <label className="text-sm">
+            <span className="mb-1 block text-slate-400">Mint mark</span>
+            <input
+              list="mint-mark-options"
+              value={form.mintMark}
+              onChange={(e) => {
+                const mark = e.target.value;
+                const knownMint = MINT_MARK_TO_MINT[mark.trim().toUpperCase()];
+                setForm((prev) => ({
+                  ...prev,
+                  mintMark: mark,
+                  ...(knownMint ? { mint: knownMint } : {}),
+                }));
+              }}
+              placeholder="e.g. P, D, S, W"
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+            />
+            <datalist id="mint-mark-options">
+              {MINT_MARK_OPTIONS.map((option) => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+          </label>
+          <label className="text-sm">
             <span className="mb-1 block text-slate-400">Mint</span>
             <input
               list="mint-options"
@@ -535,23 +557,6 @@ export default function ItemForm() {
               ))}
             </datalist>
           </label>
-          {!isSet && (
-            <label className="text-sm">
-              <span className="mb-1 block text-slate-400">Grade</span>
-              <input
-                list="grade-options"
-                value={form.grade}
-                onChange={(e) => updateField('grade', e.target.value)}
-                placeholder="e.g. MS-65, PR-69"
-                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
-              />
-              <datalist id="grade-options">
-                {GRADE_OPTIONS.map((option) => (
-                  <option key={option} value={option} />
-                ))}
-              </datalist>
-            </label>
-          )}
           <label className="text-sm">
             <span className="mb-1 block text-slate-400">Condition</span>
             <input
@@ -666,7 +671,7 @@ export default function ItemForm() {
               className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
             />
           </label>
-          <label className="sm:col-span-2 text-sm">
+          <label className="text-sm">
             <span className="mb-1 block text-slate-400">Catalog references (comma-separated)</span>
             <input
               value={form.catalogRefs}
@@ -675,6 +680,23 @@ export default function ItemForm() {
               className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
             />
           </label>
+          {!isSet && (
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-400">Grade</span>
+              <input
+                list="grade-options"
+                value={form.grade}
+                onChange={(e) => updateField('grade', e.target.value)}
+                placeholder="e.g. MS-65, PR-69 (optional)"
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
+              />
+              <datalist id="grade-options">
+                {GRADE_OPTIONS.map((option) => (
+                  <option key={option} value={option} />
+                ))}
+              </datalist>
+            </label>
+          )}
           <label className="sm:col-span-2 text-sm">
             <span className="mb-1 block text-slate-400">Notes</span>
             <textarea

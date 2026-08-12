@@ -1,9 +1,31 @@
 const METALS = ['gold', 'silver', 'copper', 'platinum', 'palladium', 'nickel'];
 
-const emptyRow = () => ({ metal: 'silver', percent: 90, purity: 0.9 });
+/** Default first row: primary precious metal. */
+const defaultFirstRow = () => ({ metal: 'silver', percent: 90, purity: 0.999 });
+
+/**
+ * Secondary metals are usually copper (e.g. 90% silver / 10% copper).
+ * Percent defaults to whatever is left to reach 100%.
+ */
+function additionalMetalRow(existingRows) {
+  const used = existingRows.reduce((sum, row) => sum + Number(row.percent || 0), 0);
+  const remaining = Math.max(0, Number((100 - used).toFixed(2)));
+  return { metal: 'copper', percent: remaining, purity: 1 };
+}
+
+/** Keep the field empty while typing; do not coerce '' → 0 mid-edit. */
+function parseOptionalNumber(raw) {
+  if (raw === '' || raw == null) return '';
+  const n = Number(raw);
+  return Number.isNaN(n) ? '' : n;
+}
+
+function displayNumber(value) {
+  return value === '' || value == null ? '' : value;
+}
 
 export default function CompositionEditor({ value = [], onChange }) {
-  const rows = value.length ? value : [emptyRow()];
+  const rows = value.length ? value : [defaultFirstRow()];
 
   const updateRow = (index, field, fieldValue) => {
     const next = rows.map((row, i) =>
@@ -12,7 +34,7 @@ export default function CompositionEditor({ value = [], onChange }) {
     onChange(next);
   };
 
-  const addRow = () => onChange([...rows, emptyRow()]);
+  const addRow = () => onChange([...rows, additionalMetalRow(rows)]);
 
   const removeRow = (index) => {
     if (rows.length === 1) return;
@@ -57,8 +79,8 @@ export default function CompositionEditor({ value = [], onChange }) {
               min="0"
               max="100"
               step="0.01"
-              value={row.percent}
-              onChange={(e) => updateRow(index, 'percent', Number(e.target.value))}
+              value={displayNumber(row.percent)}
+              onChange={(e) => updateRow(index, 'percent', parseOptionalNumber(e.target.value))}
               className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2"
             />
           </label>
@@ -68,9 +90,9 @@ export default function CompositionEditor({ value = [], onChange }) {
               type="number"
               min="0"
               max="1"
-              step="0.001"
-              value={row.purity}
-              onChange={(e) => updateRow(index, 'purity', Number(e.target.value))}
+              step="0.0001"
+              value={displayNumber(row.purity)}
+              onChange={(e) => updateRow(index, 'purity', parseOptionalNumber(e.target.value))}
               className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2"
             />
           </label>

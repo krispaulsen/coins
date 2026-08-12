@@ -65,6 +65,8 @@ const itemSchema = new mongoose.Schema(
     year: { type: Number },
     denomination: { type: String, trim: true, default: '' },
     mint: { type: String, trim: true, default: '' },
+    /** Letter mint mark (P, D, S, W, etc.) */
+    mintMark: { type: String, trim: true, default: '' },
     grade: { type: String, trim: true, default: '' },
     condition: { type: String, trim: true, default: '' },
     catalogRefs: [{ type: String, trim: true }],

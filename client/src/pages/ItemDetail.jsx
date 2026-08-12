@@ -235,6 +235,7 @@ export default function ItemDetail() {
               {[
                 !isSet && ['Denomination', item.denomination],
                 ['Mint', item.mint],
+                ['Mint mark', item.mintMark],
                 !isSet && ['Grade', item.grade],
                 ['Condition', item.condition],
                 isSet && ['Set kind', setKindLabel(item.setKind)],

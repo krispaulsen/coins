@@ -342,7 +342,7 @@ router.put('/:id', async (req, res, next) => {
 
     const allowed = [
       'title', 'itemType', 'setKind', 'setId', 'country', 'year', 'denomination',
-      'mint', 'grade', 'condition', 'catalogRefs', 'weightGrams', 'weightUnit',
+      'mint', 'mintMark', 'grade', 'condition', 'catalogRefs', 'weightGrams', 'weightUnit',
       'diameterMm', 'diameterUnit', 'thicknessMm', 'thicknessUnit',
       'composition', 'purchasePrice', 'purchaseDate', 'notes',
     ];
