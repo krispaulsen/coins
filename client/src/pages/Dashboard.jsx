@@ -93,6 +93,8 @@ export default function Dashboard() {
     total: 0,
     pages: 0,
   });
+  const [stats, setStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [page, setPage] = useState(1);
@@ -100,6 +102,20 @@ export default function Dashboard() {
   const [tableLoading, setTableLoading] = useState(true);
   const [error, setError] = useState('');
   const [togglingId, setTogglingId] = useState(null);
+
+  const loadStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const res = await api.get('/items/stats');
+      setStats(res.data);
+    } catch (err) {
+      // Non-fatal: dashboard still works without the summary card
+      console.warn('Failed to load collection stats', err);
+      setStats(null);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
 
   const loadFavorites = useCallback(async () => {
     setFavoritesLoading(true);
@@ -143,8 +159,9 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    loadStats();
     loadFavorites();
-  }, [loadFavorites]);
+  }, [loadStats, loadFavorites]);
 
   useEffect(() => {
     loadTable(search, page);
@@ -186,6 +203,10 @@ export default function Dashboard() {
     pagination.total === 0 &&
     favorites.length === 0 &&
     !search;
+  // Whole-collection total from /items/stats (not limited to the current table page)
+  const showMeltSummary =
+    (stats != null && (stats.topLevelCount > 0 || stats.coinCount > 0)) ||
+    (statsLoading && (favorites.length > 0 || pagination.total > 0));
 
   return (
     <Layout>
@@ -212,6 +233,46 @@ export default function Dashboard() {
       </div>
 
       {error && <p className="mb-4 text-red-400">{error}</p>}
+
+      {/* Collection melt summary — whole collection, not just the current page */}
+      {showMeltSummary && (
+        <section className="mb-8">
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 sm:p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-sm font-medium uppercase tracking-wide text-amber-400/90">
+                  Collection melt value
+                </h2>
+                {statsLoading && !stats ? (
+                  <p className="mt-1 text-3xl font-bold text-slate-500">…</p>
+                ) : (
+                  <p className="mt-1 text-3xl font-bold text-slate-50 sm:text-4xl">
+                    ${Number(stats?.metalValueUsd || 0).toFixed(2)}
+                  </p>
+                )}
+                <p className="mt-2 max-w-xl text-sm text-slate-400">
+                  Total melt across every coin and token in your collection. Set members are
+                  included once (not double-counted with the parent set).
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3 text-sm text-slate-400">
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-2">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Coins</p>
+                  <p className="text-lg font-semibold text-slate-200">
+                    {statsLoading && !stats ? '…' : (stats?.coinCount ?? '—')}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-4 py-2">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Items &amp; sets</p>
+                  <p className="text-lg font-semibold text-slate-200">
+                    {statsLoading && !stats ? '…' : (stats?.topLevelCount ?? '—')}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {emptyCollection ? (
         <div className="rounded-xl border border-dashed border-slate-700 p-10 text-center">

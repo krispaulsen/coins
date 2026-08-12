@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import multer from 'multer';
 import Item from '../models/Item.js';
 import { authRequired } from '../middleware/auth.js';
@@ -237,6 +238,49 @@ router.get('/', async (req, res, next) => {
         total,
         pages: Math.ceil(total / Number(limit)),
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Collection-wide stats for the dashboard.
+ * Melt is summed on non-set items only so set members are not double-counted
+ * against their parent set's stored total.
+ */
+router.get('/stats', async (req, res, next) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+
+    const [meltAgg, topLevelCount] = await Promise.all([
+      Item.aggregate([
+        {
+          $match: {
+            userId,
+            itemType: { $ne: 'set' },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            metalValueUsd: { $sum: { $ifNull: ['$metalValueUsd', 0] } },
+            coinCount: { $sum: 1 },
+          },
+        },
+      ]),
+      Item.countDocuments({
+        userId: req.user.id,
+        $or: [{ setId: null }, { setId: { $exists: false } }],
+      }),
+    ]);
+
+    const melt = meltAgg[0] || { metalValueUsd: 0, coinCount: 0 };
+
+    res.json({
+      metalValueUsd: Number((melt.metalValueUsd || 0).toFixed(2)),
+      coinCount: melt.coinCount || 0,
+      topLevelCount,
     });
   } catch (err) {
     next(err);
