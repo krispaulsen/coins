@@ -23,6 +23,7 @@ export default function ItemDetail() {
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
   const [recalculating, setRecalculating] = useState(false);
+  const [togglingFavorite, setTogglingFavorite] = useState(false);
   const [error, setError] = useState('');
 
   const loadItem = useCallback(async () => {
@@ -83,6 +84,34 @@ export default function ItemDetail() {
     }
   };
 
+  const handleToggleFavorite = async () => {
+    if (!item || togglingFavorite) return;
+    setTogglingFavorite(true);
+    setError('');
+    try {
+      const res = await api.put(`/items/${id}`, {
+        isFavorite: !item.isFavorite,
+      });
+      setItem((prev) =>
+        prev
+          ? {
+              ...prev,
+              isFavorite: res.data.isFavorite,
+              // Preserve members / parentSet from detail GET if PUT omits them
+              members: res.data.members ?? prev.members,
+              memberCount: res.data.memberCount ?? prev.memberCount,
+              parentSet: res.data.parentSet ?? prev.parentSet,
+              metalBreakdown: res.data.metalBreakdown ?? prev.metalBreakdown,
+            }
+          : res.data
+      );
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to update favorite');
+    } finally {
+      setTogglingFavorite(false);
+    }
+  };
+
   if (loading) {
     return (
       <Layout>
@@ -136,6 +165,20 @@ export default function ItemDetail() {
               Add coin to set
             </Link>
           )}
+          <button
+            type="button"
+            onClick={handleToggleFavorite}
+            disabled={togglingFavorite}
+            aria-pressed={!!item.isFavorite}
+            aria-label={item.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            className={`rounded-md border px-3 py-2 text-sm disabled:opacity-50 ${
+              item.isFavorite
+                ? 'border-amber-500/60 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+                : 'border-slate-700 hover:border-amber-500'
+            }`}
+          >
+            {item.isFavorite ? '★ Favorited' : '☆ Favorite'}
+          </button>
           <Link
             to={`/items/${id}/edit`}
             className="rounded-md border border-slate-700 px-3 py-2 text-sm hover:border-amber-500"

@@ -98,6 +98,12 @@ const itemSchema = new mongoose.Schema(
     purchasePrice: { type: Number, min: 0 },
     purchaseDate: { type: Date },
     notes: { type: String, trim: true, default: '' },
+    /** When true, item can appear in the dashboard favorites strip */
+    isFavorite: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     images: {
       obverseFileId: { type: mongoose.Schema.Types.ObjectId },
       reverseFileId: { type: mongoose.Schema.Types.ObjectId },
@@ -111,5 +117,6 @@ const itemSchema = new mongoose.Schema(
 
 itemSchema.index({ userId: 1, updatedAt: -1 });
 itemSchema.index({ userId: 1, setId: 1 });
+itemSchema.index({ userId: 1, isFavorite: 1, updatedAt: -1 });
 
 export default mongoose.model('Item', itemSchema);

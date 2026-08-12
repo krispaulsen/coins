@@ -2,7 +2,7 @@
 
 Catalog and value a personal numismatic collection. Users sign in, add coins and other items with photos and metal composition, and see **melt value** from live spot prices.
 
-**Proof sets / multi-coin groups:** choose type **set** when adding an item (Proof set, Mint set, etc.). Open the set and use **Add coin to set** for each denomination. The dashboard shows one card per set; melt value is the sum of member coins.
+**Proof sets / multi-coin groups:** choose type **set** when adding an item (Proof set, Mint set, etc.). Open the set and use **Add coin to set** for each denomination. Melt value for a set is the sum of member coins. The dashboard pins up to 12 **favorites** as cards and lists the full collection in a paginated table.
 
 | Layer | Tech | Host (free tier) |
 |-------|------|------------------|

@@ -146,6 +146,7 @@ router.get('/', async (req, res, next) => {
       limit = 20,
       includeMembers,
       setId,
+      favorite,
     } = req.query;
     const query = { userId: req.user.id };
 
@@ -154,6 +155,10 @@ router.get('/', async (req, res, next) => {
       query.setId = setId;
     } else if (includeMembers !== 'true') {
       query.$or = [{ setId: null }, { setId: { $exists: false } }];
+    }
+
+    if (favorite === 'true') {
+      query.isFavorite = true;
     }
 
     if (search) {
@@ -344,7 +349,7 @@ router.put('/:id', async (req, res, next) => {
       'title', 'itemType', 'setKind', 'setId', 'country', 'year', 'denomination',
       'mint', 'mintMark', 'grade', 'condition', 'catalogRefs', 'weightGrams', 'weightUnit',
       'diameterMm', 'diameterUnit', 'thicknessMm', 'thicknessUnit',
-      'composition', 'purchasePrice', 'purchaseDate', 'notes',
+      'composition', 'purchasePrice', 'purchaseDate', 'notes', 'isFavorite',
     ];
 
     const previousSetId = item.setId?.toString() || null;
