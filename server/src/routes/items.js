@@ -9,6 +9,14 @@ import {
   deleteFile,
   deleteFiles,
 } from '../services/gridfs.js';
+import {
+  loadTagVocabulary,
+  MAX_TAGS_PER_ITEM,
+  normalizeTagList,
+  tagExactRegex,
+} from '../services/tags.js';
+
+const MAX_BULK_TAG_IDS = 100;
 
 const router = Router();
 router.use(authRequired);
@@ -47,6 +55,7 @@ export function serializeItem(item, _req, breakdown = null, extras = {}) {
   const obj = item.toObject ? item.toObject() : { ...item };
   return {
     ...obj,
+    tags: Array.isArray(obj.tags) ? obj.tags : [],
     imageUrls: buildImageUrls(obj),
     metalBreakdown: breakdown,
     ...extras,
@@ -139,6 +148,43 @@ async function loadMembers(setItem) {
   }).sort({ denomination: 1, title: 1 });
 }
 
+async function applyNormalizedTags(item, rawTags, userId) {
+  const vocabulary = await loadTagVocabulary(Item, userId);
+  item.tags = normalizeTagList(rawTags, { existingVocabulary: vocabulary });
+}
+
+function serializeParentSet(parent) {
+  if (!parent) return null;
+  return {
+    _id: parent._id,
+    title: parent.title,
+    year: parent.year,
+    setKind: parent.setKind,
+    itemType: parent.itemType,
+  };
+}
+
+async function loadParentSetMap(items, userId) {
+  const ids = [
+    ...new Set(
+      items
+        .map((item) => item.setId)
+        .filter(Boolean)
+        .map((id) => id.toString())
+    ),
+  ];
+  if (!ids.length) return {};
+
+  const parents = await Item.find({
+    _id: { $in: ids },
+    userId,
+  }).select('title year setKind itemType');
+
+  return Object.fromEntries(
+    parents.map((parent) => [parent._id.toString(), serializeParentSet(parent)])
+  );
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const {
@@ -148,12 +194,17 @@ router.get('/', async (req, res, next) => {
       includeMembers,
       setId,
       favorite,
+      tag,
     } = req.query;
     const query = { userId: req.user.id };
+    const tagRegex = tag ? tagExactRegex(tag) : null;
 
     // Default: top-level only (loose items + sets). Members stay under their set.
+    // A tag filter is an explicit browse: include matching set members too.
     if (setId) {
       query.setId = setId;
+    } else if (tagRegex) {
+      query.tags = tagRegex;
     } else if (includeMembers !== 'true') {
       query.$or = [{ setId: null }, { setId: { $exists: false } }];
     }
@@ -169,10 +220,11 @@ router.get('/', async (req, res, next) => {
           { title: regex },
           { country: regex },
           { denomination: regex },
+          { tags: regex },
         ],
       };
       // Combine with top-level filter without clobbering $or
-      if (query.$or && !setId && includeMembers !== 'true') {
+      if (query.$or && !setId && includeMembers !== 'true' && !tagRegex) {
         query.$and = [
           { $or: query.$or },
           searchClause,
@@ -218,6 +270,8 @@ router.get('/', async (req, res, next) => {
       );
     }
 
+    const parentSetMap = await loadParentSetMap(items, req.user.id);
+
     res.json({
       items: items.map((item) => {
         const extras = {};
@@ -229,6 +283,9 @@ router.get('/', async (req, res, next) => {
           extras.memberCount = stats.memberCount;
           // Prefer live aggregate so list stays accurate without extra writes
           extras.metalValueUsd = stats.metalValueUsd;
+        }
+        if (item.setId) {
+          extras.parentSet = parentSetMap[item.setId.toString()] || null;
         }
         return serializeItem(item, req, null, extras);
       }),
@@ -287,6 +344,159 @@ router.get('/stats', async (req, res, next) => {
   }
 });
 
+router.get('/tags', async (req, res, next) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const tags = await Item.aggregate([
+      { $match: { userId, tags: { $exists: true, $ne: [] } } },
+      { $unwind: '$tags' },
+      { $match: { tags: { $type: 'string', $ne: '' } } },
+      {
+        $group: {
+          _id: { $toLower: '$tags' },
+          name: { $first: '$tags' },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { count: -1, name: 1 } },
+      { $project: { _id: 0, name: 1, count: 1 } },
+    ]);
+    res.json({ tags });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/tags', async (req, res, next) => {
+  try {
+    const fromRegex = tagExactRegex(req.body?.from);
+    const toName = normalizeTagList([req.body?.to])[0];
+    if (!fromRegex || !toName) {
+      return res.status(400).json({ error: 'Both from and to tag names are required' });
+    }
+
+    const vocabulary = await loadTagVocabulary(Item, req.user.id);
+    const [canonicalTo] = normalizeTagList([toName], { existingVocabulary: vocabulary });
+
+    const matched = await Item.find({
+      userId: req.user.id,
+      tags: fromRegex,
+    }).select('tags');
+
+    let updated = 0;
+    for (const item of matched) {
+      const next = normalizeTagList(
+        (item.tags || []).map((tag) => (fromRegex.test(tag) ? canonicalTo : tag)),
+        { existingVocabulary: [canonicalTo, ...(item.tags || [])] }
+      );
+      const changed =
+        next.length !== (item.tags || []).length ||
+        next.some((tag, i) => tag !== item.tags[i]);
+      if (changed) {
+        item.tags = next;
+        await item.save();
+        updated += 1;
+      }
+    }
+
+    res.json({ success: true, updated, name: canonicalTo });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/tags/apply', async (req, res, next) => {
+  try {
+    const rawIds = Array.isArray(req.body?.itemIds) ? req.body.itemIds : [];
+    if (!rawIds.length) {
+      return res.status(400).json({ error: 'Select at least one item' });
+    }
+    if (rawIds.length > MAX_BULK_TAG_IDS) {
+      return res.status(400).json({
+        error: `You can tag at most ${MAX_BULK_TAG_IDS} items at once`,
+      });
+    }
+
+    const itemIds = [
+      ...new Set(
+        rawIds
+          .filter((id) => mongoose.isValidObjectId(id))
+          .map((id) => String(id))
+      ),
+    ];
+    if (!itemIds.length) {
+      return res.status(400).json({ error: 'Select at least one item' });
+    }
+
+    const vocabulary = await loadTagVocabulary(Item, req.user.id);
+    const [canonical] = normalizeTagList([req.body?.tag], {
+      existingVocabulary: vocabulary,
+    });
+    if (!canonical) {
+      return res.status(400).json({ error: 'Tag name is required' });
+    }
+
+    const items = await Item.find({
+      userId: req.user.id,
+      _id: { $in: itemIds },
+    }).select('tags');
+
+    let updated = 0;
+    let alreadyTagged = 0;
+    let skippedLimit = 0;
+
+    for (const item of items) {
+      const current = item.tags || [];
+      const hasTag = current.some(
+        (tag) => tag.toLowerCase() === canonical.toLowerCase()
+      );
+      if (hasTag) {
+        alreadyTagged += 1;
+        continue;
+      }
+      if (current.length >= MAX_TAGS_PER_ITEM) {
+        skippedLimit += 1;
+        continue;
+      }
+
+      item.tags = normalizeTagList([...current, canonical], {
+        existingVocabulary: [canonical, ...current],
+      });
+      await item.save();
+      updated += 1;
+    }
+
+    res.json({
+      success: true,
+      name: canonical,
+      updated,
+      alreadyTagged,
+      skippedLimit,
+      notFound: itemIds.length - items.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/tags/:name', async (req, res, next) => {
+  try {
+    const nameRegex = tagExactRegex(req.params.name);
+    if (!nameRegex) {
+      return res.status(400).json({ error: 'Tag name is required' });
+    }
+
+    const result = await Item.updateMany(
+      { userId: req.user.id, tags: nameRegex },
+      { $pull: { tags: nameRegex } }
+    );
+
+    res.json({ success: true, updated: result.modifiedCount || 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/', async (req, res, next) => {
   try {
     const body = { ...req.body };
@@ -304,8 +514,12 @@ router.post('/', async (req, res, next) => {
       body.setKind = '';
     }
 
+    const vocabulary = await loadTagVocabulary(Item, req.user.id);
+    const tags = normalizeTagList(body.tags, { existingVocabulary: vocabulary });
+
     const item = await Item.create({
       ...body,
+      tags,
       userId: req.user.id,
       images: {
         obverseFileId: null,
@@ -393,7 +607,7 @@ router.put('/:id', async (req, res, next) => {
       'title', 'itemType', 'setKind', 'setId', 'country', 'year', 'denomination',
       'mint', 'mintMark', 'grade', 'condition', 'catalogRefs', 'weightGrams', 'weightUnit',
       'diameterMm', 'diameterUnit', 'thicknessMm', 'thicknessUnit',
-      'composition', 'purchasePrice', 'purchaseDate', 'notes', 'isFavorite',
+      'composition', 'purchasePrice', 'purchaseDate', 'notes', 'tags', 'isFavorite',
     ];
 
     const previousSetId = item.setId?.toString() || null;
@@ -414,6 +628,10 @@ router.put('/:id', async (req, res, next) => {
 
     if (item.itemType !== 'set') {
       item.setKind = item.setKind || '';
+    }
+
+    if (req.body.tags !== undefined) {
+      await applyNormalizedTags(item, req.body.tags, req.user.id);
     }
 
     await item.save();

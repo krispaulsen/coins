@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import api from '../api/client.js';
 import Layout from '../components/Layout.jsx';
 import AuthImage from '../components/AuthImage.jsx';
+import { TagChip } from '../components/TagInput.jsx';
 
 const FAVORITES_LIMIT = 12;
 const TABLE_PAGE_SIZE = 20;
@@ -84,7 +85,46 @@ function FavoriteCard({ item, onToggleFavorite, togglingId }) {
   );
 }
 
+function SelectAllCheckbox({ checked, indeterminate, onChange, disabled, label }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = Boolean(indeterminate);
+  }, [indeterminate]);
+
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      onChange={onChange}
+      aria-label={label}
+      className="table-checkbox"
+    />
+  );
+}
+
+function TableTagList({ tags }) {
+  if (!tags?.length) return <span className="text-slate-600">—</span>;
+  const shown = tags.slice(0, 2);
+  const extra = tags.length - shown.length;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {shown.map((tag) => (
+        <TagChip key={tag} name={tag} to={`/?tag=${encodeURIComponent(tag)}`} />
+      ))}
+      {extra > 0 && (
+        <span className="self-center text-xs text-slate-500" title={tags.slice(2).join(', ')}>
+          +{extra}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tagFilter = searchParams.get('tag') || '';
   const [favorites, setFavorites] = useState([]);
   const [items, setItems] = useState([]);
   const [pagination, setPagination] = useState({
@@ -102,6 +142,14 @@ export default function Dashboard() {
   const [tableLoading, setTableLoading] = useState(true);
   const [error, setError] = useState('');
   const [togglingId, setTogglingId] = useState(null);
+  const [tagCatalog, setTagCatalog] = useState([]);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [tagBusy, setTagBusy] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkTag, setBulkTag] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
@@ -131,13 +179,24 @@ export default function Dashboard() {
     }
   }, []);
 
-  const loadTable = useCallback(async (query = '', pageNum = 1) => {
+  const loadTags = useCallback(async () => {
+    try {
+      const res = await api.get('/items/tags');
+      setTagCatalog(res.data.tags || []);
+    } catch (err) {
+      console.warn('Failed to load tags', err);
+      setTagCatalog([]);
+    }
+  }, []);
+
+  const loadTable = useCallback(async (query = '', pageNum = 1, tag = '') => {
     setTableLoading(true);
     setError('');
     try {
       const res = await api.get('/items', {
         params: {
           search: query || undefined,
+          tag: tag || undefined,
           page: pageNum,
           limit: TABLE_PAGE_SIZE,
         },
@@ -161,16 +220,132 @@ export default function Dashboard() {
   useEffect(() => {
     loadStats();
     loadFavorites();
-  }, [loadStats, loadFavorites]);
+    loadTags();
+  }, [loadStats, loadFavorites, loadTags]);
 
   useEffect(() => {
-    loadTable(search, page);
-  }, [loadTable, search, page]);
+    loadTable(search, page, tagFilter);
+  }, [loadTable, search, page, tagFilter]);
+
+  useEffect(() => {
+    setPage(1);
+    setRenaming(false);
+    setRenameValue(tagFilter);
+    setSelectedIds(new Set());
+  }, [tagFilter]);
 
   const handleSearch = (e) => {
     e.preventDefault();
     setPage(1);
+    setSelectedIds(new Set());
     setSearch(searchInput.trim());
+  };
+
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectPage = (checked) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const item of items) {
+        if (checked) next.add(item._id);
+        else next.delete(item._id);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkApply = async (e) => {
+    e.preventDefault();
+    const tag = bulkTag.trim();
+    if (!tag || selectedIds.size === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const res = await api.post('/items/tags/apply', {
+        itemIds: [...selectedIds],
+        tag,
+      });
+      const name = res.data.name || tag;
+      const parts = [`Tagged ${res.data.updated} item${res.data.updated === 1 ? '' : 's'} with “${name}”.`];
+      if (res.data.alreadyTagged) {
+        parts.push(
+          `${res.data.alreadyTagged} already had it.`
+        );
+      }
+      if (res.data.skippedLimit) {
+        parts.push(
+          `${res.data.skippedLimit} already have 20 tags.`
+        );
+      }
+      setNotice(parts.join(' '));
+      setBulkTag('');
+      setSelectedIds(new Set());
+      await Promise.all([loadTags(), loadTable(search, page, tagFilter)]);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to apply tag');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const selectTag = (name) => {
+    const next = new URLSearchParams(searchParams);
+    if (name) {
+      next.set('tag', name);
+    } else {
+      next.delete('tag');
+    }
+    setSearchParams(next);
+  };
+
+  const handleRenameTag = async (e) => {
+    e.preventDefault();
+    const to = renameValue.trim();
+    if (!tagFilter || !to || tagBusy) return;
+    setTagBusy(true);
+    setError('');
+    try {
+      const res = await api.patch('/items/tags', { from: tagFilter, to });
+      setRenaming(false);
+      await loadTags();
+      const nextName = res.data.name || to;
+      if (nextName !== tagFilter) {
+        selectTag(nextName);
+      } else {
+        await loadTable(search, page, nextName);
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to rename tag');
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
+  const handleDeleteTag = async () => {
+    if (!tagFilter || tagBusy) return;
+    const confirmed = window.confirm(
+      `Remove the tag “${tagFilter}” from every item in your collection?`
+    );
+    if (!confirmed) return;
+    setTagBusy(true);
+    setError('');
+    try {
+      await api.delete(`/items/tags/${encodeURIComponent(tagFilter)}`);
+      await loadTags();
+      selectTag('');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to delete tag');
+    } finally {
+      setTagBusy(false);
+    }
   };
 
   const handleToggleFavorite = async (item) => {
@@ -197,12 +372,17 @@ export default function Dashboard() {
 
   const totalPages = pagination.pages || 0;
   const currentPage = pagination.page || page;
+  const selectedCount = selectedIds.size;
+  const selectedOnPage = items.filter((item) => selectedIds.has(item._id)).length;
+  const allOnPage = items.length > 0 && selectedOnPage === items.length;
+  const someOnPage = selectedOnPage > 0 && !allOnPage;
   const emptyCollection =
     !tableLoading &&
     !favoritesLoading &&
     pagination.total === 0 &&
     favorites.length === 0 &&
-    !search;
+    !search &&
+    !tagFilter;
   // Whole-collection total from /items/stats (not limited to the current table page)
   const showMeltSummary =
     (stats != null && (stats.topLevelCount > 0 || stats.coinCount > 0)) ||
@@ -233,6 +413,26 @@ export default function Dashboard() {
       </div>
 
       {error && <p className="mb-4 text-red-400">{error}</p>}
+      {notice && <p className="mb-4 text-sm text-amber-300">{notice}</p>}
+
+      {(tagCatalog.length > 0 || tagFilter) && (
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          <TagChip
+            name="All items"
+            active={!tagFilter}
+            onClick={() => selectTag('')}
+          />
+          {tagCatalog.map((entry) => (
+            <TagChip
+              key={entry.name}
+              name={`${entry.name} (${entry.count})`}
+              title={entry.name}
+              active={tagFilter.toLowerCase() === entry.name.toLowerCase()}
+              onClick={() => selectTag(entry.name)}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Collection melt summary — whole collection, not just the current page */}
       {showMeltSummary && (
@@ -310,7 +510,9 @@ export default function Dashboard() {
           <section>
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">All items</h2>
+                <h2 className="text-lg font-semibold">
+                  {tagFilter ? `Tagged “${tagFilter}”` : 'All items'}
+                </h2>
                 <p className="text-sm text-slate-400">
                   {tableLoading
                     ? 'Loading…'
@@ -318,6 +520,61 @@ export default function Dashboard() {
                         search ? ` matching “${search}”` : ''
                       }`}
                 </p>
+                {tagFilter && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {renaming ? (
+                      <form onSubmit={handleRenameTag} className="flex flex-wrap gap-2">
+                        <input
+                          type="text"
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          maxLength={32}
+                          className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm"
+                          aria-label="New tag name"
+                        />
+                        <button
+                          type="submit"
+                          disabled={tagBusy || !renameValue.trim()}
+                          className="rounded-md border border-slate-700 px-2 py-1 text-sm hover:border-amber-500 disabled:opacity-40"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRenaming(false);
+                            setRenameValue(tagFilter);
+                          }}
+                          className="rounded-md px-2 py-1 text-sm text-slate-400 hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                      </form>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          disabled={tagBusy}
+                          onClick={() => {
+                            setRenameValue(tagFilter);
+                            setRenaming(true);
+                          }}
+                          className="text-sm text-slate-400 hover:text-amber-400 disabled:opacity-40"
+                        >
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          disabled={tagBusy}
+                          onClick={handleDeleteTag}
+                          className="text-sm text-slate-400 hover:text-red-400 disabled:opacity-40"
+                        >
+                          Delete tag
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               {totalPages > 0 && (
                 <p className="text-sm text-slate-400">
@@ -326,23 +583,82 @@ export default function Dashboard() {
               )}
             </div>
 
+            {selectedCount > 0 && (
+              <div className="mb-3 flex flex-col gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-slate-200">
+                  {selectedCount} selected
+                  {selectedOnPage !== selectedCount
+                    ? ` (${selectedOnPage} on this page)`
+                    : ''}
+                </p>
+                <form
+                  onSubmit={handleBulkApply}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <input
+                    type="text"
+                    list="bulk-tag-options"
+                    value={bulkTag}
+                    onChange={(e) => setBulkTag(e.target.value)}
+                    maxLength={32}
+                    placeholder="Tag to apply"
+                    className="rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm"
+                    aria-label="Tag to apply to selected items"
+                  />
+                  <datalist id="bulk-tag-options">
+                    {tagCatalog.map((entry) => (
+                      <option key={entry.name} value={entry.name} />
+                    ))}
+                  </datalist>
+                  <button
+                    type="submit"
+                    disabled={bulkBusy || !bulkTag.trim()}
+                    className="rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-slate-950 hover:bg-amber-400 disabled:opacity-40"
+                  >
+                    {bulkBusy ? 'Applying…' : 'Apply tag'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIds(new Set())}
+                    className="text-sm text-slate-400 hover:text-white"
+                  >
+                    Clear
+                  </button>
+                </form>
+              </div>
+            )}
+
             {tableLoading && items.length === 0 ? (
               <p className="text-slate-400">Loading collection...</p>
             ) : items.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm text-slate-400">
-                {search ? 'No items match your search.' : 'No items to show.'}
+                {tagFilter
+                  ? 'No items with this tag.'
+                  : search
+                    ? 'No items match your search.'
+                    : 'No items to show.'}
               </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-slate-800">
-                <table className="w-full min-w-[640px] text-left text-sm">
+                <table className="w-full min-w-[800px] text-left text-sm">
                   <thead className="border-b border-slate-800 bg-slate-900/80 text-slate-400">
                     <tr>
+                      <th className="px-3 py-3 font-medium">
+                        <SelectAllCheckbox
+                          checked={allOnPage}
+                          indeterminate={someOnPage}
+                          disabled={tableLoading || items.length === 0}
+                          onChange={(e) => toggleSelectPage(e.target.checked)}
+                          label="Select all items on this page"
+                        />
+                      </th>
                       <th className="px-3 py-3 font-medium"> </th>
                       <th className="px-3 py-3 font-medium">Title</th>
                       <th className="px-3 py-3 font-medium">Year</th>
                       <th className="px-3 py-3 font-medium">Country</th>
                       <th className="px-3 py-3 font-medium">Type</th>
                       <th className="px-3 py-3 font-medium">Detail</th>
+                      <th className="px-3 py-3 font-medium">Tags</th>
                       <th className="px-3 py-3 font-medium text-right">Melt</th>
                       <th className="px-3 py-3 font-medium text-center">★</th>
                     </tr>
@@ -356,12 +672,25 @@ export default function Dashboard() {
                           : '—'
                         : item.denomination || '—';
                       const busy = togglingId === item._id;
+                      const parentSet = item.parentSet;
+                      const isSelected = selectedIds.has(item._id);
 
                       return (
                         <tr
                           key={item._id}
-                          className="bg-slate-950/40 transition hover:bg-slate-900/60"
+                          className={`transition hover:bg-slate-900/60 ${
+                            isSelected ? 'bg-amber-500/5' : 'bg-slate-950/40'
+                          }`}
                         >
+                          <td className="px-3 py-2">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelected(item._id)}
+                              aria-label={`Select ${item.title}`}
+                              className="table-checkbox"
+                            />
+                          </td>
                           <td className="px-3 py-2">
                             <Link to={`/items/${item._id}`}>
                               <AuthImage
@@ -378,6 +707,14 @@ export default function Dashboard() {
                             >
                               {item.title}
                             </Link>
+                            {parentSet && (
+                              <Link
+                                to={`/items/${parentSet._id}`}
+                                className="mt-0.5 block text-xs text-slate-500 hover:text-amber-400"
+                              >
+                                In {parentSet.title}
+                              </Link>
+                            )}
                           </td>
                           <td className="px-3 py-2 text-slate-400">{item.year || '—'}</td>
                           <td className="px-3 py-2 text-slate-400">{item.country || '—'}</td>
@@ -385,6 +722,9 @@ export default function Dashboard() {
                             {typeLabel(item)}
                           </td>
                           <td className="px-3 py-2 text-slate-400">{detail}</td>
+                          <td className="px-3 py-2">
+                            <TableTagList tags={item.tags} />
+                          </td>
                           <td className="px-3 py-2 text-right text-amber-400">
                             ${Number(item.metalValueUsd || 0).toFixed(2)}
                           </td>

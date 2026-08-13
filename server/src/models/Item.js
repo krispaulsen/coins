@@ -105,6 +105,11 @@ const itemSchema = new mongoose.Schema(
     purchasePrice: { type: Number, min: 0 },
     purchaseDate: { type: Date },
     notes: { type: String, trim: true, default: '' },
+    /** Free-form labels invented by the user. Normalized on write. */
+    tags: {
+      type: [String],
+      default: [],
+    },
     /** When true, item can appear in the dashboard favorites strip */
     isFavorite: {
       type: Boolean,
@@ -125,5 +130,6 @@ const itemSchema = new mongoose.Schema(
 itemSchema.index({ userId: 1, updatedAt: -1 });
 itemSchema.index({ userId: 1, setId: 1 });
 itemSchema.index({ userId: 1, isFavorite: 1, updatedAt: -1 });
+itemSchema.index({ userId: 1, tags: 1 });
 
 export default mongoose.model('Item', itemSchema);

@@ -5,6 +5,7 @@ import Layout from '../components/Layout.jsx';
 import AuthImage from '../components/AuthImage.jsx';
 import ImageSlotUpload from '../components/ImageSlotUpload.jsx';
 import MetalValueCard from '../components/MetalValueCard.jsx';
+import { TagChip } from '../components/TagInput.jsx';
 
 const SET_KIND_LABELS = {
   proof: 'Proof set',
@@ -155,6 +156,13 @@ export default function ItemDetail() {
             {item.country ? ` · ${item.country}` : ''}
             {isSet ? ` · ${members.length} coin${members.length === 1 ? '' : 's'}` : ''}
           </p>
+          {item.tags?.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {item.tags.map((tag) => (
+                <TagChip key={tag} name={tag} to={`/?tag=${encodeURIComponent(tag)}`} />
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           {isSet && (
@@ -260,6 +268,13 @@ export default function ItemDetail() {
                               .filter(Boolean)
                               .join(' · ') || 'Coin'}
                           </p>
+                          {member.tags?.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {member.tags.map((tag) => (
+                                <TagChip key={tag} name={tag} />
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <p className="shrink-0 text-sm text-amber-400">
                           ${Number(member.metalValueUsd || 0).toFixed(2)}

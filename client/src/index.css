@@ -3,3 +3,47 @@
 body {
   @apply bg-slate-950 text-slate-100 min-h-screen;
 }
+
+/*
+ * Native checkboxes ignore background-color. Reset appearance so unchecked
+ * boxes match the dark table instead of the OS chrome (white on Windows).
+ */
+.table-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  vertical-align: middle;
+  cursor: pointer;
+  border-radius: 0.25rem;
+  border: 1px solid #475569;
+  background-color: #0f172a;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 0.75rem 0.75rem;
+}
+
+.table-checkbox:checked,
+.table-checkbox:indeterminate {
+  border-color: #f59e0b;
+  background-color: #f59e0b;
+}
+
+.table-checkbox:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2302030a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5 6.5 11.5 12.5 4.5'/%3E%3C/svg%3E");
+}
+
+.table-checkbox:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2302030a' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M3.5 8h9'/%3E%3C/svg%3E");
+}
+
+.table-checkbox:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+.table-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}

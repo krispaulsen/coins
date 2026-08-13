@@ -2,7 +2,7 @@
 
 Catalog and value a personal numismatic collection. Users sign in, add coins and other items with photos and metal composition, and see **melt value** from live spot prices.
 
-**Proof sets / multi-coin groups:** choose type **set** when adding an item (Proof set, Mint set, etc.). Open the set and use **Add coin to set** for each denomination. Melt value for a set is the sum of member coins. The dashboard pins up to 12 **favorites** as cards and lists the full collection in a paginated table.
+**Proof sets / multi-coin groups:** choose type **set** when adding an item (Proof set, Mint set, etc.). Open the set and use **Add coin to set** for each denomination. Melt value for a set is the sum of member coins. The dashboard pins up to 12 **favorites** as cards and lists the full collection in a paginated table. **Tags** are free-form labels you invent (silver, inherited, to-sell). Filter the table with `/?tag=…`; a tag filter includes matching sets **and** matching coins inside sets.
 
 | Layer | Tech | Host (free tier) |
 |-------|------|------------------|
@@ -129,6 +129,7 @@ No paid third-party API keys are required for the MVP.
 
 - **Auth** — email/password register & login, JWT (7-day expiry), rate-limited auth routes
 - **Items** — CRUD for coins, tokens, medals, banknotes, etc., scoped to the signed-in user
+- **Tags** — free-form labels per item, dashboard filter chips, bulk-apply from the table, rename/delete across the collection
 - **Images** — obverse, reverse, and additional photos stored in GridFS; resized with `sharp` (max 1200px JPEG). Attach via file browse or **clipboard paste** (Ctrl+V / Paste button; HTTPS or localhost required for clipboard API)
 - **Composition** — metal rows (gold, silver, copper, platinum, palladium, nickel) with percent and purity
 - **Melt value** — troy-oz weight × spot price, cached ~60 minutes in MongoDB
@@ -151,7 +152,11 @@ Sum of entries → `metalValueUsd` on the item.
 | POST | `/api/auth/register` | Create account |
 | POST | `/api/auth/login` | Return JWT |
 | GET | `/api/auth/me` | Current user |
-| GET/POST | `/api/items` | List / create |
+| GET/POST | `/api/items` | List / create (`?tag=` includes matching set members) |
+| GET | `/api/items/tags` | Distinct tags + counts for the signed-in user |
+| PATCH | `/api/items/tags` | Rename a tag (`{ from, to }`); merges if `to` exists |
+| POST | `/api/items/tags/apply` | Add one tag to many items (`{ itemIds, tag }`) |
+| DELETE | `/api/items/tags/:name` | Remove a tag from every owned item |
 | GET/PUT/DELETE | `/api/items/:id` | Detail / update / delete |
 | POST | `/api/items/:id/images/:slot` | Upload (`obverse` \| `reverse` \| `additional`) |
 | DELETE | `/api/items/:id/images/:fileId` | Remove image |

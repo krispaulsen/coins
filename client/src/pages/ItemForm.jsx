@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import api from '../api/client.js';
 import Layout from '../components/Layout.jsx';
 import CompositionEditor from '../components/CompositionEditor.jsx';
+import TagInput from '../components/TagInput.jsx';
 
 const GRAMS_PER_TROY_OZ = 31.1034768;
 const MM_PER_INCH = 25.4;
@@ -28,6 +29,7 @@ const emptyForm = {
   purchasePrice: '',
   purchaseDate: '',
   notes: '',
+  tags: [],
   composition: [{ metal: 'silver', percent: 90, purity: 0.999 }],
 };
 
@@ -221,6 +223,7 @@ export default function ItemForm() {
               ? new Date(item.purchaseDate).toISOString().slice(0, 10)
               : '',
             notes: item.notes || '',
+            tags: Array.isArray(item.tags) ? item.tags : [],
             composition: item.composition?.length
               ? item.composition
               : [{ metal: 'silver', percent: 90, purity: 0.999 }],
@@ -319,6 +322,7 @@ export default function ItemForm() {
       purchasePrice: form.purchasePrice ? Number(form.purchasePrice) : undefined,
       purchaseDate: form.purchaseDate || undefined,
       notes: form.notes,
+      tags: form.tags || [],
       setId: isSetType ? null : parentSetId || null,
     };
 
@@ -699,6 +703,16 @@ export default function ItemForm() {
               </datalist>
             </label>
           )}
+          <label className="sm:col-span-2 text-sm">
+            <span className="mb-1 block text-slate-400">Tags</span>
+            <TagInput
+              value={form.tags}
+              onChange={(tags) => updateField('tags', tags)}
+            />
+            <span className="mt-1 block text-xs text-slate-500">
+              Invent any labels you like — silver, inherited, to-sell. Enter or comma to add.
+            </span>
+          </label>
           <label className="sm:col-span-2 text-sm">
             <span className="mb-1 block text-slate-400">Notes</span>
             <textarea
