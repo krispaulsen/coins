@@ -168,10 +168,24 @@ export default function Dashboard() {
   const loadFavorites = useCallback(async () => {
     setFavoritesLoading(true);
     try {
-      const res = await api.get('/items', {
-        params: { favorite: 'true', limit: FAVORITES_LIMIT },
-      });
-      setFavorites(res.data.items || []);
+      let items = [];
+      try {
+        const res = await api.get('/items/favorites', {
+          params: { limit: FAVORITES_LIMIT },
+        });
+        items = res.data.items || [];
+      } catch {
+        // Older API builds have no /favorites route; it matches /:id and 500s.
+        const res = await api.get('/items', {
+          params: {
+            favorite: 'true',
+            isFavorite: 'true',
+            limit: FAVORITES_LIMIT,
+          },
+        });
+        items = res.data.items || [];
+      }
+      setFavorites(items.filter((item) => item.isFavorite));
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load favorites');
     } finally {

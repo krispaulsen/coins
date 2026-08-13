@@ -185,6 +185,62 @@ async function loadParentSetMap(items, userId) {
   );
 }
 
+/** Query flags may arrive as 'true', true, or ['true'] depending on host/parser. */
+function queryFlagEnabled(value) {
+  if (Array.isArray(value)) return value.some(queryFlagEnabled);
+  if (value === true || value === 1) return true;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+  }
+  return false;
+}
+
+async function presentItemList(items, req) {
+  const setIds = items.filter((i) => i.itemType === 'set').map((i) => i._id);
+
+  let memberStats = {};
+  if (setIds.length) {
+    const stats = await Item.aggregate([
+      { $match: { setId: { $in: setIds } } },
+      {
+        $group: {
+          _id: '$setId',
+          memberCount: { $sum: 1 },
+          metalValueUsd: { $sum: { $ifNull: ['$metalValueUsd', 0] } },
+        },
+      },
+    ]);
+    memberStats = Object.fromEntries(
+      stats.map((s) => [
+        s._id.toString(),
+        {
+          memberCount: s.memberCount,
+          metalValueUsd: Number((s.metalValueUsd || 0).toFixed(2)),
+        },
+      ])
+    );
+  }
+
+  const parentSetMap = await loadParentSetMap(items, req.user.id);
+
+  return items.map((item) => {
+    const extras = {};
+    if (item.itemType === 'set') {
+      const stats = memberStats[item._id.toString()] || {
+        memberCount: 0,
+        metalValueUsd: 0,
+      };
+      extras.memberCount = stats.memberCount;
+      extras.metalValueUsd = stats.metalValueUsd;
+    }
+    if (item.setId) {
+      extras.parentSet = parentSetMap[item.setId.toString()] || null;
+    }
+    return serializeItem(item, req, null, extras);
+  });
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const {
@@ -194,10 +250,12 @@ router.get('/', async (req, res, next) => {
       includeMembers,
       setId,
       favorite,
+      isFavorite,
       tag,
     } = req.query;
     const query = { userId: req.user.id };
     const tagRegex = tag ? tagExactRegex(tag) : null;
+    const includeSetMembers = queryFlagEnabled(includeMembers);
 
     // Default: top-level only (loose items + sets). Members stay under their set.
     // A tag filter is an explicit browse: include matching set members too.
@@ -205,11 +263,11 @@ router.get('/', async (req, res, next) => {
       query.setId = setId;
     } else if (tagRegex) {
       query.tags = tagRegex;
-    } else if (includeMembers !== 'true') {
+    } else if (!includeSetMembers) {
       query.$or = [{ setId: null }, { setId: { $exists: false } }];
     }
 
-    if (favorite === 'true') {
+    if (queryFlagEnabled(favorite) || queryFlagEnabled(isFavorite)) {
       query.isFavorite = true;
     }
 
@@ -224,7 +282,7 @@ router.get('/', async (req, res, next) => {
         ],
       };
       // Combine with top-level filter without clobbering $or
-      if (query.$or && !setId && includeMembers !== 'true' && !tagRegex) {
+      if (query.$or && !setId && !includeSetMembers && !tagRegex) {
         query.$and = [
           { $or: query.$or },
           searchClause,
@@ -241,59 +299,48 @@ router.get('/', async (req, res, next) => {
       Item.countDocuments(query),
     ]);
 
-    // For set cards on the dashboard: attach memberCount and aggregated melt
-    const setIds = items
-      .filter((i) => i.itemType === 'set')
-      .map((i) => i._id);
-
-    let memberStats = {};
-    if (setIds.length) {
-      // setIds already scoped to this user via the list query above
-      const stats = await Item.aggregate([
-        { $match: { setId: { $in: setIds } } },
-        {
-          $group: {
-            _id: '$setId',
-            memberCount: { $sum: 1 },
-            metalValueUsd: { $sum: { $ifNull: ['$metalValueUsd', 0] } },
-          },
-        },
-      ]);
-      memberStats = Object.fromEntries(
-        stats.map((s) => [
-          s._id.toString(),
-          {
-            memberCount: s.memberCount,
-            metalValueUsd: Number((s.metalValueUsd || 0).toFixed(2)),
-          },
-        ])
-      );
-    }
-
-    const parentSetMap = await loadParentSetMap(items, req.user.id);
-
     res.json({
-      items: items.map((item) => {
-        const extras = {};
-        if (item.itemType === 'set') {
-          const stats = memberStats[item._id.toString()] || {
-            memberCount: 0,
-            metalValueUsd: 0,
-          };
-          extras.memberCount = stats.memberCount;
-          // Prefer live aggregate so list stays accurate without extra writes
-          extras.metalValueUsd = stats.metalValueUsd;
-        }
-        if (item.setId) {
-          extras.parentSet = parentSetMap[item.setId.toString()] || null;
-        }
-        return serializeItem(item, req, null, extras);
-      }),
+      items: await presentItemList(items, req),
       pagination: {
         page: Number(page),
         limit: Number(limit),
         total,
         pages: Math.ceil(total / Number(limit)),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Pinned dashboard favorites. Dedicated path so the filter cannot be dropped
+ * if a host/proxy coerces or strips the `favorite` query flag.
+ */
+router.get('/favorites', async (req, res, next) => {
+  try {
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(Math.max(Math.trunc(rawLimit), 1), 50)
+      : 12;
+    const query = {
+      userId: req.user.id,
+      isFavorite: true,
+      $or: [{ setId: null }, { setId: { $exists: false } }],
+    };
+
+    const [items, total] = await Promise.all([
+      Item.find(query).sort({ updatedAt: -1 }).limit(limit),
+      Item.countDocuments(query),
+    ]);
+
+    res.json({
+      items: await presentItemList(items, req),
+      pagination: {
+        page: 1,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 0,
       },
     });
   } catch (err) {
