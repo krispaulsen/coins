@@ -7,6 +7,26 @@ import { TagChip } from '../components/TagInput.jsx';
 
 const FAVORITES_LIMIT = 12;
 const TABLE_PAGE_SIZE = 20;
+const FAVORITES_OPEN_KEY = 'dashboard.favoritesOpen';
+
+function readSessionFlag(key, fallback) {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (raw === '0' || raw === 'false') return false;
+    if (raw === '1' || raw === 'true') return true;
+  } catch {
+    // sessionStorage can throw in private mode
+  }
+  return fallback;
+}
+
+function writeSessionFlag(key, value) {
+  try {
+    sessionStorage.setItem(key, value ? '1' : '0');
+  } catch {
+    // ignore quota / privacy errors
+  }
+}
 
 const SET_KIND_LABELS = {
   proof: 'Proof set',
@@ -104,14 +124,21 @@ function SelectAllCheckbox({ checked, indeterminate, onChange, disabled, label }
   );
 }
 
-function TableTagList({ tags }) {
+function tagFilterHref(tag, searchParams) {
+  const next = new URLSearchParams(searchParams);
+  next.set('tag', tag);
+  const qs = next.toString();
+  return qs ? `/?${qs}` : '/';
+}
+
+function TableTagList({ tags, searchParams }) {
   if (!tags?.length) return <span className="text-slate-600">—</span>;
   const shown = tags.slice(0, 2);
   const extra = tags.length - shown.length;
   return (
     <div className="flex flex-wrap gap-1">
       {shown.map((tag) => (
-        <TagChip key={tag} name={tag} to={`/?tag=${encodeURIComponent(tag)}`} />
+        <TagChip key={tag} name={tag} to={tagFilterHref(tag, searchParams)} />
       ))}
       {extra > 0 && (
         <span className="self-center text-xs text-slate-500" title={tags.slice(2).join(', ')}>
@@ -122,10 +149,54 @@ function TableTagList({ tags }) {
   );
 }
 
+function parseTableSort(searchParams) {
+  if (searchParams.get('sort') === 'year') {
+    return {
+      sortBy: 'year',
+      sortDir: searchParams.get('dir') === 'desc' ? 'desc' : 'asc',
+    };
+  }
+  return { sortBy: 'updatedAt', sortDir: 'desc' };
+}
+
+function YearSortHeader({ sortBy, sortDir, onToggle }) {
+  const active = sortBy === 'year';
+  const ariaSort = !active ? 'none' : sortDir === 'asc' ? 'ascending' : 'descending';
+  const indicator = !active ? '↕' : sortDir === 'asc' ? '↑' : '↓';
+  const label = !active
+    ? 'Sort by year, oldest first'
+    : sortDir === 'asc'
+      ? 'Sorted by year, oldest first. Click to sort newest first'
+      : 'Sorted by year, newest first. Click to return to recent updates';
+
+  return (
+    <th className="px-3 py-3 font-medium" aria-sort={ariaSort}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`inline-flex items-center gap-1 rounded-sm hover:text-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 ${
+          active ? 'text-slate-200' : ''
+        }`}
+        aria-label={label}
+        title={label}
+      >
+        Year
+        <span className={active ? 'text-amber-400' : 'text-slate-600'} aria-hidden="true">
+          {indicator}
+        </span>
+      </button>
+    </th>
+  );
+}
+
 export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tagFilter = searchParams.get('tag') || '';
+  const { sortBy, sortDir } = parseTableSort(searchParams);
   const [favorites, setFavorites] = useState([]);
+  const [favoritesOpen, setFavoritesOpen] = useState(() =>
+    readSessionFlag(FAVORITES_OPEN_KEY, true)
+  );
   const [items, setItems] = useState([]);
   const [pagination, setPagination] = useState({
     page: 1,
@@ -203,7 +274,13 @@ export default function Dashboard() {
     }
   }, []);
 
-  const loadTable = useCallback(async (query = '', pageNum = 1, tag = '') => {
+  const loadTable = useCallback(async (
+    query = '',
+    pageNum = 1,
+    tag = '',
+    sortField = 'updatedAt',
+    sortOrder = 'desc'
+  ) => {
     setTableLoading(true);
     setError('');
     try {
@@ -213,6 +290,8 @@ export default function Dashboard() {
           tag: tag || undefined,
           page: pageNum,
           limit: TABLE_PAGE_SIZE,
+          sort: sortField === 'year' ? 'year' : undefined,
+          dir: sortField === 'year' ? sortOrder : undefined,
         },
       });
       setItems(res.data.items || []);
@@ -238,8 +317,16 @@ export default function Dashboard() {
   }, [loadStats, loadFavorites, loadTags]);
 
   useEffect(() => {
-    loadTable(search, page, tagFilter);
-  }, [loadTable, search, page, tagFilter]);
+    writeSessionFlag(FAVORITES_OPEN_KEY, favoritesOpen);
+  }, [favoritesOpen]);
+
+  useEffect(() => {
+    loadTable(search, page, tagFilter, sortBy, sortDir);
+  }, [loadTable, search, page, tagFilter, sortBy, sortDir]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [sortBy, sortDir]);
 
   useEffect(() => {
     setPage(1);
@@ -302,7 +389,7 @@ export default function Dashboard() {
       setNotice(parts.join(' '));
       setBulkTag('');
       setSelectedIds(new Set());
-      await Promise.all([loadTags(), loadTable(search, page, tagFilter)]);
+      await Promise.all([loadTags(), loadTable(search, page, tagFilter, sortBy, sortDir)]);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to apply tag');
     } finally {
@@ -320,6 +407,22 @@ export default function Dashboard() {
     setSearchParams(next);
   };
 
+  const toggleYearSort = () => {
+    const next = new URLSearchParams(searchParams);
+    if (sortBy !== 'year') {
+      next.set('sort', 'year');
+      next.set('dir', 'asc');
+    } else if (sortDir === 'asc') {
+      next.set('sort', 'year');
+      next.set('dir', 'desc');
+    } else {
+      next.delete('sort');
+      next.delete('dir');
+    }
+    setPage(1);
+    setSearchParams(next);
+  };
+
   const handleRenameTag = async (e) => {
     e.preventDefault();
     const to = renameValue.trim();
@@ -334,7 +437,7 @@ export default function Dashboard() {
       if (nextName !== tagFilter) {
         selectTag(nextName);
       } else {
-        await loadTable(search, page, nextName);
+        await loadTable(search, page, nextName, sortBy, sortDir);
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to rename tag');
@@ -498,26 +601,56 @@ export default function Dashboard() {
       ) : (
         <>
           {/* Favorites strip */}
-          <section className="mb-10">
-            <h2 className="mb-4 text-lg font-semibold">Favorites</h2>
-            {favoritesLoading ? (
-              <p className="text-slate-400">Loading favorites...</p>
-            ) : favorites.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm text-slate-400">
-                Star items to pin them here. Open an item and choose Favorite.
-              </div>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {favorites.map((item) => (
-                  <FavoriteCard
-                    key={item._id}
-                    item={item}
-                    onToggleFavorite={handleToggleFavorite}
-                    togglingId={togglingId}
-                  />
+          <section className={favoritesOpen ? 'mb-10' : 'mb-6'}>
+            <button
+              type="button"
+              onClick={() => setFavoritesOpen((open) => !open)}
+              aria-expanded={favoritesOpen}
+              aria-controls="dashboard-favorites"
+              aria-label={
+                favoritesLoading
+                  ? favoritesOpen
+                    ? 'Collapse favorites'
+                    : 'Expand favorites'
+                  : `${favoritesOpen ? 'Collapse' : 'Expand'} favorites, ${favorites.length} item${
+                      favorites.length === 1 ? '' : 's'
+                    }`
+              }
+              className="mb-4 flex w-full items-center justify-between gap-3 rounded-md text-left hover:text-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500"
+            >
+              <h2 className="text-lg font-semibold">
+                Favorites
+                {!favoritesLoading && (
+                  <span className="ml-2 text-sm font-normal text-slate-400">
+                    ({favorites.length})
+                  </span>
+                )}
+              </h2>
+              <span className="text-sm text-slate-400" aria-hidden="true">
+                {favoritesOpen ? '▾' : '▸'}
+              </span>
+            </button>
+            <div id="dashboard-favorites" hidden={!favoritesOpen}>
+              {favoritesOpen &&
+                (favoritesLoading ? (
+                  <p className="text-slate-400">Loading favorites...</p>
+                ) : favorites.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm text-slate-400">
+                    Star items to pin them here. Open an item and choose Favorite.
+                  </div>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {favorites.map((item) => (
+                      <FavoriteCard
+                        key={item._id}
+                        item={item}
+                        onToggleFavorite={handleToggleFavorite}
+                        togglingId={togglingId}
+                      />
+                    ))}
+                  </div>
                 ))}
-              </div>
-            )}
+            </div>
           </section>
 
           {/* Full collection table */}
@@ -532,6 +665,10 @@ export default function Dashboard() {
                     ? 'Loading…'
                     : `${pagination.total} item${pagination.total === 1 ? '' : 's'}${
                         search ? ` matching “${search}”` : ''
+                      }${
+                        sortBy === 'year'
+                          ? ` · ${sortDir === 'asc' ? 'oldest first' : 'newest first'}`
+                          : ''
                       }`}
                 </p>
                 {tagFilter && (
@@ -668,7 +805,11 @@ export default function Dashboard() {
                       </th>
                       <th className="px-3 py-3 font-medium"> </th>
                       <th className="px-3 py-3 font-medium">Title</th>
-                      <th className="px-3 py-3 font-medium">Year</th>
+                      <YearSortHeader
+                        sortBy={sortBy}
+                        sortDir={sortDir}
+                        onToggle={toggleYearSort}
+                      />
                       <th className="px-3 py-3 font-medium">Country</th>
                       <th className="px-3 py-3 font-medium">Type</th>
                       <th className="px-3 py-3 font-medium">Detail</th>
@@ -737,7 +878,7 @@ export default function Dashboard() {
                           </td>
                           <td className="px-3 py-2 text-slate-400">{detail}</td>
                           <td className="px-3 py-2">
-                            <TableTagList tags={item.tags} />
+                            <TableTagList tags={item.tags} searchParams={searchParams} />
                           </td>
                           <td className="px-3 py-2 text-right text-amber-400">
                             ${Number(item.metalValueUsd || 0).toFixed(2)}

@@ -196,6 +196,70 @@ function queryFlagEnabled(value) {
   return false;
 }
 
+/**
+ * List sort: `sort=year|updatedAt` and `dir=asc|desc`.
+ * Unknown fields fall back to recently updated (updatedAt desc).
+ */
+function parseListSort(query = {}) {
+  const rawField = String(query.sort || query.sortBy || 'updatedAt')
+    .trim()
+    .toLowerCase();
+  const field = rawField === 'year' ? 'year' : 'updatedAt';
+  const rawDir = String(query.dir || query.sortDir || '')
+    .trim()
+    .toLowerCase();
+  let direction;
+  if (rawDir === 'asc' || rawDir === '1' || rawDir === 'ascending') {
+    direction = 1;
+  } else if (rawDir === 'desc' || rawDir === '-1' || rawDir === 'descending') {
+    direction = -1;
+  } else {
+    direction = field === 'year' ? 1 : -1;
+  }
+
+  const spec =
+    field === 'year'
+      ? { year: direction, title: 1, _id: 1 }
+      : { updatedAt: direction, _id: direction };
+
+  return {
+    field,
+    direction,
+    dir: direction === 1 ? 'asc' : 'desc',
+    spec,
+  };
+}
+
+function toObjectId(value) {
+  if (!value || value instanceof mongoose.Types.ObjectId) return value;
+  if (mongoose.Types.ObjectId.isValid(value)) {
+    return new mongoose.Types.ObjectId(String(value));
+  }
+  return value;
+}
+
+/** Year sort puts items with no year after dated items in both directions. */
+async function findListPage(query, listSort, skip, limit) {
+  if (listSort.field !== 'year') {
+    return Item.find(query).sort(listSort.spec).skip(skip).limit(limit);
+  }
+
+  const missingYear =
+    listSort.direction === 1 ? Number.MAX_SAFE_INTEGER : Number.MIN_SAFE_INTEGER;
+  const match = { ...query };
+  if (match.userId) match.userId = toObjectId(match.userId);
+  if (match.setId) match.setId = toObjectId(match.setId);
+
+  return Item.aggregate([
+    { $match: match },
+    { $addFields: { _sortYear: { $ifNull: ['$year', missingYear] } } },
+    { $sort: { _sortYear: listSort.direction, title: 1, _id: 1 } },
+    { $skip: skip },
+    { $limit: limit },
+    { $project: { _sortYear: 0 } },
+  ]);
+}
+
 async function presentItemList(items, req) {
   const setIds = items.filter((i) => i.itemType === 'set').map((i) => i._id);
 
@@ -253,6 +317,7 @@ router.get('/', async (req, res, next) => {
       isFavorite,
       tag,
     } = req.query;
+    const listSort = parseListSort(req.query);
     const query = { userId: req.user.id };
     const tagRegex = tag ? tagExactRegex(tag) : null;
     const includeSetMembers = queryFlagEnabled(includeMembers);
@@ -295,7 +360,7 @@ router.get('/', async (req, res, next) => {
 
     const skip = (Number(page) - 1) * Number(limit);
     const [items, total] = await Promise.all([
-      Item.find(query).sort({ updatedAt: -1 }).skip(skip).limit(Number(limit)),
+      findListPage(query, listSort, skip, Number(limit)),
       Item.countDocuments(query),
     ]);
 
@@ -306,6 +371,10 @@ router.get('/', async (req, res, next) => {
         limit: Number(limit),
         total,
         pages: Math.ceil(total / Number(limit)),
+      },
+      sort: {
+        field: listSort.field,
+        dir: listSort.dir,
       },
     });
   } catch (err) {
