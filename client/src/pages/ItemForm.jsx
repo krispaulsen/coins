@@ -86,6 +86,45 @@ function displayLengthToMm(value, unit) {
   return num;
 }
 
+/** Map an API item onto form state. Used for edit and copy-from. */
+function itemToFormState(item) {
+  const weightUnit = item.weightUnit === 'oz t' ? 'oz t' : 'g';
+  const diameterUnit = item.diameterUnit === 'in' ? 'in' : 'mm';
+  const thicknessUnit = item.thicknessUnit === 'in' ? 'in' : 'mm';
+  return {
+    title: item.title || '',
+    itemType: item.itemType || 'coin',
+    setKind: item.setKind || '',
+    country: item.country || '',
+    year: item.year || '',
+    denomination: item.denomination || '',
+    mint: item.mint || '',
+    mintMark: item.mintMark || '',
+    grade: item.grade || '',
+    condition: item.condition || '',
+    catalogRefs: (item.catalogRefs || []).join(', '),
+    weight: gramsToDisplayWeight(item.weightGrams, weightUnit),
+    weightUnit,
+    diameter: mmToDisplayLength(item.diameterMm, diameterUnit),
+    diameterUnit,
+    thickness: mmToDisplayLength(item.thicknessMm, thicknessUnit),
+    thicknessUnit,
+    purchasePrice: item.purchasePrice ?? '',
+    purchaseDate: item.purchaseDate
+      ? new Date(item.purchaseDate).toISOString().slice(0, 10)
+      : '',
+    notes: item.notes || '',
+    tags: Array.isArray(item.tags) ? [...item.tags] : [],
+    composition: item.composition?.length
+      ? item.composition.map((row) => ({
+          metal: row.metal,
+          percent: row.percent,
+          purity: row.purity,
+        }))
+      : [{ metal: 'silver', percent: 90, purity: 0.999 }],
+  };
+}
+
 const COUNTRY_OPTIONS = ['United States', 'Canada', 'Mexico'];
 
 const DENOMINATION_OPTIONS = ['$1', '50¢', '25¢', '10¢', '5¢', '1¢'];
@@ -175,11 +214,13 @@ export default function ItemForm() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const parentSetIdParam = searchParams.get('setId') || '';
+  const copyFromParam = searchParams.get('copyFrom') || '';
   const isEdit = Boolean(id);
   const navigate = useNavigate();
   const [form, setForm] = useState(emptyForm);
   const [parentSet, setParentSet] = useState(null);
   const [parentSetId, setParentSetId] = useState(parentSetIdParam);
+  const [copiedFrom, setCopiedFrom] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -197,43 +238,28 @@ export default function ItemForm() {
           const res = await api.get(`/items/${id}`);
           if (cancelled) return;
           const item = res.data;
-          const weightUnit = item.weightUnit === 'oz t' ? 'oz t' : 'g';
-          const diameterUnit = item.diameterUnit === 'in' ? 'in' : 'mm';
-          const thicknessUnit = item.thicknessUnit === 'in' ? 'in' : 'mm';
-          setForm({
-            title: item.title || '',
-            itemType: item.itemType || 'coin',
-            setKind: item.setKind || '',
-            country: item.country || '',
-            year: item.year || '',
-            denomination: item.denomination || '',
-            mint: item.mint || '',
-            mintMark: item.mintMark || '',
-            grade: item.grade || '',
-            condition: item.condition || '',
-            catalogRefs: (item.catalogRefs || []).join(', '),
-            weight: gramsToDisplayWeight(item.weightGrams, weightUnit),
-            weightUnit,
-            diameter: mmToDisplayLength(item.diameterMm, diameterUnit),
-            diameterUnit,
-            thickness: mmToDisplayLength(item.thicknessMm, thicknessUnit),
-            thicknessUnit,
-            purchasePrice: item.purchasePrice ?? '',
-            purchaseDate: item.purchaseDate
-              ? new Date(item.purchaseDate).toISOString().slice(0, 10)
-              : '',
-            notes: item.notes || '',
-            tags: Array.isArray(item.tags) ? item.tags : [],
-            composition: item.composition?.length
-              ? item.composition
-              : [{ metal: 'silver', percent: 90, purity: 0.999 }],
-          });
+          setForm(itemToFormState(item));
           setParentSetId(item.setId || '');
           setParentSet(item.parentSet || null);
+          setCopiedFrom(null);
+        } else if (copyFromParam) {
+          const res = await api.get(`/items/${copyFromParam}`);
+          if (cancelled) return;
+          const item = res.data;
+          setForm(itemToFormState(item));
+          setCopiedFrom({ _id: item._id, title: item.title });
+          if (item.itemType === 'set') {
+            setParentSetId('');
+            setParentSet(null);
+          } else {
+            setParentSetId(item.setId || '');
+            setParentSet(item.parentSet || null);
+          }
         } else if (parentSetIdParam) {
           const res = await api.get(`/items/${parentSetIdParam}`);
           if (cancelled) return;
           const set = res.data;
+          setCopiedFrom(null);
           if (set.itemType !== 'set') {
             setError('Parent item is not a set');
             setParentSetId('');
@@ -262,6 +288,7 @@ export default function ItemForm() {
           setForm(emptyForm);
           setParentSet(null);
           setParentSetId('');
+          setCopiedFrom(null);
         }
       } catch (err) {
         if (!cancelled) {
@@ -276,7 +303,7 @@ export default function ItemForm() {
     return () => {
       cancelled = true;
     };
-  }, [id, isEdit, parentSetIdParam]);
+  }, [id, isEdit, parentSetIdParam, copyFromParam]);
 
   const updateField = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -373,9 +400,11 @@ export default function ItemForm() {
 
   const cancelTo = isEdit
     ? `/items/${id}`
-    : parentSetId
-      ? `/items/${parentSetId}`
-      : '/';
+    : copiedFrom
+      ? `/items/${copiedFrom._id}`
+      : parentSetId
+        ? `/items/${parentSetId}`
+        : '/';
 
   if (loading) {
     return (
@@ -396,12 +425,30 @@ export default function ItemForm() {
             ? isSet
               ? 'Edit Set'
               : 'Edit Item'
-            : isSet
-              ? 'Add Set'
-              : parentSet
-                ? 'Add Coin to Set'
-                : 'Add Item'}
+            : copiedFrom
+              ? isSet
+                ? 'Copy Set'
+                : parentSet
+                  ? 'Copy Coin to Set'
+                  : 'Copy Item'
+              : isSet
+                ? 'Add Set'
+                : parentSet
+                  ? 'Add Coin to Set'
+                  : 'Add Item'}
         </h1>
+        {copiedFrom && (
+          <p className="mt-1 text-sm text-slate-400">
+            Copied from{' '}
+            <Link
+              to={`/items/${copiedFrom._id}`}
+              className="text-amber-400 hover:text-amber-300"
+            >
+              {copiedFrom.title}
+            </Link>
+            {' '}— change what differs, then save.
+          </p>
+        )}
         {parentSet && !isSet && (
           <p className="mt-1 text-sm text-slate-400">
             Part of{' '}
@@ -445,12 +492,11 @@ export default function ItemForm() {
                       : '',
                 }));
               }}
-              disabled={Boolean(parentSetId) && !isEdit}
-              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 disabled:opacity-60"
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2"
             >
               {ITEM_TYPE_OPTIONS.filter((type) => {
-                // Don't offer "set" when adding a member under a set
-                if (parentSetId && !isEdit && type === 'set') return false;
+                // Sets cannot be nested under another set
+                if (parentSetId && type === 'set') return false;
                 return true;
               }).map((type) => (
                 <option key={type} value={type}>

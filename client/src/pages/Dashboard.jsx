@@ -46,7 +46,7 @@ function itemSubtitle(item) {
             item.year,
             item.country,
             item.memberCount != null
-                ? `${item.memberCount} coin${item.memberCount === 1 ? '' : 's'}`
+                ? `${item.memberCount} ${item.memberCount === 1 ? 'item' : 'items'}`
                 : null,
         ]
             .filter(Boolean)
@@ -822,7 +822,7 @@ export default function Dashboard() {
                                             const isSet = item.itemType === 'set';
                                             const detail = isSet
                                                 ? item.memberCount != null
-                                                    ? `${item.memberCount} coin${item.memberCount === 1 ? '' : 's'}`
+                                                    ? `${item.memberCount} ${item.memberCount === 1 ? 'item' : 'items'}`
                                                     : '—'
                                                 : item.denomination || '—';
                                             const busy = togglingId === item._id;
